@@ -1,0 +1,16 @@
+glew-cmake*
+glfw*
+glm*
+imgui*
+flags*
+.vscode*
+cache*
+.cache*
+*.ilk
+*.pdb
+*.exe
+.ninja_log
+data.hpp
+data_ids.hpp
+DataContainer
+compile_commands.json

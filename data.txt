@@ -1,0 +1,36 @@
+global{no-conversions}
+
+object{
+	name{thing}
+	size{30000}
+	storage_type{erasable}
+
+	property{
+		name{x}
+		type{float}
+	}
+	property{
+		name{y}
+		type{float}
+	}
+	property{
+		name{direction}
+		type{float}
+	}
+	property{
+		name{path_length}
+		type{float}
+	}
+	property{
+		name{hp_display}
+		type{int}
+	}
+	property{
+		name{hp_current}
+		type{int}
+	}
+	property{
+		name{hp_max}
+		type{int}
+	}
+}
