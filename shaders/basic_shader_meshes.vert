@@ -23,5 +23,4 @@ void main()
 		texcoord = vec2(1.f - texcoord.x, texcoord.y);
 	}
 	position = (model * vec4(in_position, 1.0)).xyz;
-
 }

@@ -17,6 +17,13 @@ static GLuint SPRITE_ROGUE_MOVE_BACK_1;
 static GLuint SPRITE_ROGUE_MOVE_BACK_2;
 static GLuint SPRITE_ROGUE_ATTACK;
 
+static GLuint TILE_EARTH_RED;
+
+static GLuint SPRITE_GRASS[5] {};
+static GLuint SPRITE_TREE[1] {};
+static GLuint SPRITE_BUSH[1] {};
+
+
 void
 new_basic_texture(
 	GLuint& texture_id,
@@ -44,7 +51,7 @@ new_basic_texture(
 	);
 }
 
-void load_rogue_textures(){
+void load_textures(){
 	new_basic_texture(SPRITE_ROGUE_MOVE_FORWARD_1, "./assets/sprites/rogue/forward-1.png");
 	new_basic_texture(SPRITE_ROGUE_MOVE_FORWARD_2, "./assets/sprites/rogue/forward-2.png");
 	new_basic_texture(SPRITE_ROGUE_MOVE_FORWARD_LEFT_1, "./assets/sprites/rogue/forward-left-1.png");
@@ -56,8 +63,60 @@ void load_rogue_textures(){
 	new_basic_texture(SPRITE_ROGUE_ATTACK, "./assets/sprites/rogue/attack.png");
 	new_basic_texture(SPRITE_ROGUE_MOVE_LEFT_1, "./assets/sprites/rogue/left-1.png");
 	new_basic_texture(SPRITE_ROGUE_MOVE_LEFT_2, "./assets/sprites/rogue/left-2.png");
+
+	new_basic_texture(TILE_EARTH_RED, "./assets/tiles/earth_block.png");
+
+	new_basic_texture(SPRITE_GRASS[0], "./assets/sprites/grass/1.png");
+	new_basic_texture(SPRITE_GRASS[1], "./assets/sprites/grass/2.png");
+	new_basic_texture(SPRITE_GRASS[2], "./assets/sprites/grass/3.png");
+	new_basic_texture(SPRITE_GRASS[3], "./assets/sprites/grass/4.png");
+	new_basic_texture(SPRITE_GRASS[4], "./assets/sprites/grass/7.png");
+
+	new_basic_texture(SPRITE_TREE[0], "./assets/sprites/tree/1.png");
+	new_basic_texture(SPRITE_BUSH[0], "./assets/sprites/bush/1.png");
 }
 
+void choose_tile_texture(
+	GLuint texture_shader_location,
+	GLuint texture_flip_location
+) {
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(texture_flip_location, 0);
+	glUniform1i(texture_shader_location, 0);
+	glBindTexture(GL_TEXTURE_2D, TILE_EARTH_RED);
+}
+
+void choose_grass_texture(
+	GLuint texture_shader_location,
+	GLuint texture_flip_location,
+	GLuint count
+) {
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(texture_flip_location, count % 2);
+	glUniform1i(texture_shader_location, 0);
+	glBindTexture(GL_TEXTURE_2D, SPRITE_GRASS[count % 5]);
+}
+
+void choose_tree_texture(
+	GLuint texture_shader_location,
+	GLuint texture_flip_location,
+	GLuint count
+) {
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(texture_flip_location, count % 2);
+	glUniform1i(texture_shader_location, 0);
+	glBindTexture(GL_TEXTURE_2D, SPRITE_TREE[0]);
+}
+void choose_bush_texture(
+	GLuint texture_shader_location,
+	GLuint texture_flip_location,
+	GLuint count
+) {
+	glActiveTexture(GL_TEXTURE0);
+	glUniform1i(texture_flip_location, count % 2);
+	glUniform1i(texture_shader_location, 0);
+	glBindTexture(GL_TEXTURE_2D, SPRITE_BUSH[0]);
+}
 void
 choose_rogue_sprite(
 	GLuint texture_shader_location,

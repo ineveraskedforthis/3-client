@@ -34,6 +34,10 @@
 
 #include "sprite.hpp"
 
+constexpr inline float TILE_SIZE = 64.f;
+
+constexpr inline float GRASS_TILE_SIZE = 16.f;
+
 
 void APIENTRY glDebugOutput(
 	GLenum source,
@@ -242,11 +246,18 @@ struct vertex {
 	glm::vec2 texture_coordinate;
 };
 
-static std::vector<vertex> world_object_mesh = {
-	{{-0.5f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 1.f}},
-	{{0.5f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 1.f}},
-	{{-0.5f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 0.f}},
-	{{0.5f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 0.f}}
+static std::vector<vertex> world_object_vertical_mesh = {
+	{{-0.5f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {0.f, 1.f}},
+	{{0.5f, 0.f, 0.f}, {0.f, 1.f, 0.f}, {1.f, 1.f}},
+	{{-0.5f, 1.f, 1.f}, {0.f, 1.f, 0.f}, {0.f, 0.f}},
+	{{0.5f, 1.f, 1.f}, {0.f, 1.f, 0.f}, {1.f, 0.f}}
+};
+
+static std::vector<vertex> world_object_horizontal_mesh = {
+	{{0.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 1.f}},
+	{{1.f, 0.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 1.f}},
+	{{0.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {0.f, 0.f}},
+	{{1.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 0.f}}
 };
 
 buffer_pair create_world_object_buffer() {
@@ -254,7 +265,7 @@ buffer_pair create_world_object_buffer() {
 	GLuint vbo;
 	glGenBuffers(1, &vbo);
 	glBindBuffer(GL_ARRAY_BUFFER, vbo);
-	glBufferData(GL_ARRAY_BUFFER, world_object_mesh.size() * sizeof(vertex), world_object_mesh.data(), GL_STATIC_DRAW);
+	glBufferData(GL_ARRAY_BUFFER, world_object_vertical_mesh.size() * sizeof(vertex), world_object_vertical_mesh.data(), GL_STATIC_DRAW);
 
 	GLuint vao;
 	glGenVertexArrays(1, &vao);
@@ -273,6 +284,74 @@ buffer_pair create_world_object_buffer() {
 	return {vao, vbo};
 }
 
+buffer_pair create_world_tile_buffer() {
+
+	GLuint vbo;
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, world_object_horizontal_mesh.size() * sizeof(vertex), world_object_horizontal_mesh.data(), GL_STATIC_DRAW);
+
+	GLuint vao;
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(0));
+
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(sizeof(float) * 3));
+
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(sizeof(float) * 3 + sizeof(float) * 3));
+
+	return {vao, vbo};
+}
+
+constexpr inline int grass_quads =512;
+
+buffer_pair create_grass_buffer(
+	std::default_random_engine& rng,
+	std::uniform_real_distribution<float>& uniform
+) {
+	static std::vector<vertex> grass_mesh;
+
+	for (int count = 0; count < grass_quads; count++) {
+		grass_mesh.push_back(world_object_vertical_mesh[0]);
+		grass_mesh.push_back(world_object_vertical_mesh[1]);
+		grass_mesh.push_back(world_object_vertical_mesh[2]);
+		grass_mesh.push_back(world_object_vertical_mesh[2]);
+		grass_mesh.push_back(world_object_vertical_mesh[1]);
+		grass_mesh.push_back(world_object_vertical_mesh[3]);
+
+		auto shift = glm::vec3(uniform(rng), uniform(rng), 0.f);
+
+		for (int prev = 0; prev < 6; prev++) {
+			grass_mesh[grass_mesh.size() - 1 - prev].position += shift * GRASS_TILE_SIZE;
+		}
+	}
+
+	GLuint vbo;
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, grass_mesh.size() * sizeof(vertex), grass_mesh.data(), GL_STATIC_DRAW);
+
+	GLuint vao;
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(0));
+
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(sizeof(float) * 3));
+
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(sizeof(float) * 3 + sizeof(float) * 3));
+
+	return {vao, vbo};
+}
 
 namespace geometry {
 
@@ -313,7 +392,18 @@ static dcon::data_container container {};
 
 int main(void)
 {
-	container.create_thing();
+
+	std::default_random_engine rng;
+	std::uniform_real_distribution<float> uniform{0.0, 1.0};
+	std::normal_distribution<float> normal_d{0.f, 0.1f};
+	std::normal_distribution<float> size_d{1.f, 0.3f};
+
+
+	for (int count = 0; count < 20; count++) {
+		auto item = container.create_thing();
+		container.thing_set_x(item, cosf(float(count)));
+		container.thing_set_y(item, sinf(float(count)));
+	}
 
 	glfwSetErrorCallback(error_callback);
 	if (!glfwInit())
@@ -382,8 +472,10 @@ int main(void)
 
 
 	auto object_mesh = create_world_object_buffer();
+	auto tile_mesh = create_world_tile_buffer();
+	auto grass_mesh = create_grass_buffer(rng, uniform);
 
-	load_rogue_textures();
+	load_textures();
 
 	assert_no_errors();
 
@@ -410,11 +502,6 @@ int main(void)
 	float albedo_world[] = {0.4f, 0.5f, 0.8f};
 	float albedo_character[] = {0.5f, 0.5f, 0.5f};
 	float albedo_critter[] = {0.5f, 0.1f, 0.1f};
-
-	std::default_random_engine rng;
-	std::uniform_real_distribution<float> uniform{0.0, 1.0};
-	std::normal_distribution<float> normal_d{0.f, 0.1f};
-	std::normal_distribution<float> size_d{1.f, 0.3f};
 
 	glm::vec3 camera_position{0.f, 0.f, 15.f};
 
@@ -537,6 +624,7 @@ int main(void)
 
 		glUseProgram(basic_shader);
 
+
 		assert_no_errors();
 
 		glm::mat4 model (1.f);
@@ -544,14 +632,140 @@ int main(void)
 		glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
 		glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
 
-		// glUniform3fv(albedo_location, 1, albedo_world);
+
+		/*
+		Start very simple, optimise later:
+		Render tiles as horisontal squares.
+		Render grass as vertical squares.
+		*/
+
+		glBindVertexArray(tile_mesh.vao);
+
+		auto visible_tile_x = floor(camera_position.x / TILE_SIZE);
+		auto visible_tile_y = floor(-camera_position.y / TILE_SIZE);
+
+		for (float i = visible_tile_x - 2.f; i <= visible_tile_x + 2.f; i++) {
+			for (float j = visible_tile_y - 2.f; j <= visible_tile_y + 2.f; j++) {
+				glm::mat4 model (1.f);
+				model = glm::translate(model, {i * TILE_SIZE, -j * TILE_SIZE, 0.f});
+				// glUniform3fv(albedo_location, 1, albedo_character);
+
+				choose_tile_texture(albedo_texture_location, flip_location);
+
+				model = glm::scale(model, {TILE_SIZE, TILE_SIZE, 1.f});
+				glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glDrawArrays(
+					GL_TRIANGLE_STRIP,
+					0,
+					4
+				);
+			}
+		}
+
+
+		auto visible_grass_tile_x = floor(camera_position.x / GRASS_TILE_SIZE);
+		auto visible_grass_tile_y = floor(-camera_position.y / GRASS_TILE_SIZE);
+
+		glBindVertexArray(grass_mesh.vao);
+		for (float i = visible_grass_tile_x - 2.f; i <= visible_grass_tile_x + 1.f; i++) {
+			for (float j = visible_grass_tile_y - 1.f; j <= visible_grass_tile_y + 1.f; j++) {
+				glm::mat4 model (1.f);
+				// glUniform3fv(albedo_location, 1, albedo_character);
+
+
+				auto seed = ((int)i ^ (int)j);
+
+				rng.seed(seed);
+
+				for (int count = 0; count < 20; count++) {
+
+					choose_grass_texture(albedo_texture_location, flip_location, count);
+
+					auto dx = uniform(rng);
+					auto dy = uniform(rng);
+					auto size = 0.5f  + uniform(rng) * 0.5f;
+
+					glm::mat4 model (1.f);
+					model = glm::translate(model, {(i + dx) * GRASS_TILE_SIZE, -(j + dy) * GRASS_TILE_SIZE, 0.01f});
+					model = glm::scale(model, {1.0f, size, size});
+					glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+					glDrawArrays(
+						GL_TRIANGLES,
+						0,
+						6 * grass_quads
+					);
+				}
+			}
+		}
+
+		glBindVertexArray(object_mesh.vao);
+		for (float i = visible_tile_x - 2.f; i <= visible_tile_x + 1.f; i++) {
+			for (float j = visible_tile_y - 1.f; j <= visible_tile_y + 1.f; j++) {
+				glm::mat4 model (1.f);
+				// glUniform3fv(albedo_location, 1, albedo_character);
+
+
+				auto seed = ((int)i ^ (int)j ^ 546441212);
+
+				rng.seed(seed);
+
+				for (int count = 0; count < 50; count++) {
+
+					choose_tree_texture(albedo_texture_location, flip_location, count);
+
+					auto dx = uniform(rng);
+					auto dy = uniform(rng);
+					auto size = 3.f + uniform(rng);
+
+					glm::mat4 model (1.f);
+					model = glm::translate(model, {(i + dx) * TILE_SIZE, -(j + dy) * TILE_SIZE, 0.01f});
+					model = glm::scale(model, {size, size, size});
+					glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+					glDrawArrays(
+						GL_TRIANGLE_STRIP,
+						0,
+						4
+					);
+				}
+			}
+		}
+
+		glBindVertexArray(object_mesh.vao);
+		for (float i = visible_tile_x - 2.f; i <= visible_tile_x + 1.f; i++) {
+			for (float j = visible_tile_y - 1.f; j <= visible_tile_y + 1.f; j++) {
+				glm::mat4 model (1.f);
+				// glUniform3fv(albedo_location, 1, albedo_character);
+
+
+				auto seed = ((int)i ^ (int)j ^ 3451231);
+
+				rng.seed(seed);
+
+				for (int count = 0; count < 200; count++) {
+
+					choose_bush_texture(albedo_texture_location, flip_location, count);
+
+					auto dx = uniform(rng);
+					auto dy = uniform(rng);
+					auto size = 2.f + uniform(rng) * 0.5f;
+
+					glm::mat4 model (1.f);
+					model = glm::translate(model, {(i + dx) * TILE_SIZE, -(j + dy) * TILE_SIZE, 0.01f});
+					model = glm::scale(model, {size, size, size});
+					glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+					glDrawArrays(
+						GL_TRIANGLE_STRIP,
+						0,
+						4
+					);
+				}
+			}
+		}
 
 		assert_no_errors();
 
 		glBindVertexArray(object_mesh.vao);
 		container.for_each_thing([&] (dcon::thing_id cid) {
-			// auto rotation = container.thing_get_direction(cid);
-
 			float rotation = time;
 			auto dx = cosf(time);
 			auto dy = sinf(time);
@@ -569,11 +783,8 @@ int main(void)
 			);
 
 			glm::mat4 model (1.f);
-			model = glm::translate(model, {container.thing_get_x(cid), -container.thing_get_y(cid), 0.f});
-			// glUniform3fv(albedo_location, 1, albedo_character);
-
+			model = glm::translate(model, {container.thing_get_x(cid), -container.thing_get_y(cid), 0.01f});
 			model = glm::scale(model, {1.f, 1.f, 1.f});
-			// model = glm::rotate(model, rotation, glm::vec3{0.f, 0.f, 1.f});
 			glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 			glDrawArrays(
 				GL_TRIANGLE_STRIP,
@@ -581,7 +792,6 @@ int main(void)
 				4
 			);
 		});
-
 
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 
