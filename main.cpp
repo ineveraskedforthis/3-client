@@ -673,6 +673,9 @@ int main(void)
 
 					auto distance = sqrtf((position_received.x - last_x) * (position_received.x - last_x) +  (position_received.y - last_y) * (position_received.y - last_y));
 					auto path = container.visible_spatial_entity_get_path_length(entity);
+					if (distance > 0.01f) {
+						distance /= 3.f;
+					}
 					container.visible_spatial_entity_set_path_length(entity, path + distance);
 
 					container.visible_spatial_entity_set_x(entity, position_received.x);
@@ -712,7 +715,7 @@ int main(void)
 						auto entity = container.create_known_fighter();
 						container.known_fighter_set_hp_current(entity, position_received.hp);
 						container.known_fighter_set_hp_max(entity, position_received.max_hp);
-						index_to_fighter[spatial] = entity;
+						index_to_fighter[position_received.fighter_id] = entity;
 						fighter_to_link = entity;
 					}
 				}
@@ -766,15 +769,23 @@ int main(void)
 		glm::vec3 light_y = glm::cross(light_x, light_z);
 
 		{
-			static float f = 0.0f;
-			static int counter = 0;
-
-			ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
-
-			if (ImPlot::BeginPlot("Character stats.")) {
+			ImGui::Begin("Stats");
+			if (ImPlot::BeginPlot("Energy")) {
+				static ImPlotAxisFlags flags;
+				ImPlot::SetupAxes("X","Y",flags,flags);
+				ImPlot::SetupAxesLimits(0,energy_history.size(),0,1);
+				ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, 1.f, 1.f);
 				ImPlot::PlotLine("Energy", energy_history.data(), energy_history.size());
 				ImPlot::EndPlot();
 			}
+			ImGui::End();
+		}
+
+		{
+			static float f = 0.0f;
+			static int counter = 0;
+
+			ImGui::Begin("Enter server");                          // Create a window called "Hello, world!" and append into it.
 
 			if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
 				counter++;
