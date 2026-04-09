@@ -25,7 +25,7 @@ object{
 
 object{
 	name{known_fighter}
-	size{30000}
+	size{3000}
 	storage_type{erasable}
 
 	property{
@@ -39,5 +39,22 @@ object{
 	property{
 		name{hp_max}
 		type{int}
+	}
+}
+
+relationship{
+	name{fighter_location}
+	size{4000}
+	storage_type{erasable}
+	link{
+		object{known_fighter}
+		name{fighter}
+		type{unique}
+	}
+
+	link{
+		object{visible_spatial_entity}
+		name{spatial_entity}
+		type{unique}
 	}
 }

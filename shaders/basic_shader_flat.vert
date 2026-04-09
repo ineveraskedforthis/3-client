@@ -1,16 +1,15 @@
 #version 330 core
 
-uniform vec2 shift;
-uniform float zoom;
-uniform float aspect_ratio;
+uniform mat4 model;
+uniform mat4 view;
+uniform mat4 projection;
+uniform int flip;
 
 layout (location = 0) in vec3 in_position;
-out vec3 pixel_position;
+layout (location = 1) in vec3 in_normal;
+layout (location = 2) in vec2 in_texcoord;
 
 void main()
 {
-	vec3 result = in_position * zoom / vec3(aspect_ratio, 1.f, 1.f);
-	result.xy += shift;
-	gl_Position = vec4(result, 1.0);
-	pixel_position = result;
+	gl_Position = projection * view * model * vec4(in_position, 1.0);
 }

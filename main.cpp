@@ -554,18 +554,32 @@ int main(void)
 
 	assert_no_errors();
 
+
+
+	// setting up a flat shader
+	std::string flat_shader_vertex_path = "./shaders/basic_shader_flat.vert";
+	std::string flat_shader_fragment_path = "./shaders/basic_shader_flat.frag";
+	std::string flat_vertex_shader_source = read_shader( flat_shader_vertex_path );
+	std::string flat_fragment_shader_source = read_shader( flat_shader_fragment_path );
+	auto flat_shader = create_program(
+		create_shader(GL_VERTEX_SHADER, flat_vertex_shader_source.c_str()),
+		create_shader(GL_FRAGMENT_SHADER, flat_fragment_shader_source.c_str())
+	);
+	GLuint flat_model_location = glGetUniformLocation(flat_shader, "model");
+	GLuint flat_view_location = glGetUniformLocation(flat_shader, "view");
+	GLuint flat_projection_location = glGetUniformLocation(flat_shader, "projection");
+	GLuint flat_albedo_location = glGetUniformLocation(flat_shader, "albedo");
+
+
 	// setting up a basic shader
 	std::string basic_shader_vertex_path = "./shaders/basic_shader_meshes.vert";
 	std::string basic_shader_fragment_path = "./shaders/basic_shader_meshes.frag";
-
 	std::string vertex_shader_source = read_shader( basic_shader_vertex_path );
 	std::string fragment_shader_source = read_shader( basic_shader_fragment_path );
-
 	auto basic_shader = create_program(
 		create_shader(GL_VERTEX_SHADER, vertex_shader_source.c_str()),
 		create_shader(GL_FRAGMENT_SHADER, fragment_shader_source.c_str())
 	);
-
 	GLuint model_location = glGetUniformLocation(basic_shader, "model");
 	GLuint view_location = glGetUniformLocation(basic_shader, "view");
 	GLuint projection_location = glGetUniformLocation(basic_shader, "projection");
@@ -646,6 +660,9 @@ int main(void)
 
 				auto spatial = position_received.spatial_entity_id;
 
+				dcon::visible_spatial_entity_id location_to_link{};
+				dcon::known_fighter_id fighter_to_link{};
+
 				auto it = index_to_spatial_entity.find(spatial);
 				if (it != index_to_spatial_entity.end()) {
 					auto entity = it->second;
@@ -665,7 +682,7 @@ int main(void)
 						camera_target.x = position_received.x;
 						camera_target.y = -position_received.y - 5.f;
 					}
-
+					location_to_link = entity;
 				} else {
 					auto entity = container.create_visible_spatial_entity();
 					container.visible_spatial_entity_set_direction(entity, position_received.direction);
@@ -674,6 +691,7 @@ int main(void)
 					container.visible_spatial_entity_set_y(entity, position_received.y);
 
 					index_to_spatial_entity[spatial] = entity;
+					location_to_link = entity;
 				}
 
 				if (position_received.fighter_id > -1) {
@@ -689,13 +707,20 @@ int main(void)
 							}
 							energy_history.back() = my_energy;
 						}
+						fighter_to_link = entity;
 					} else {
 						auto entity = container.create_known_fighter();
 						container.known_fighter_set_hp_current(entity, position_received.hp);
 						container.known_fighter_set_hp_max(entity, position_received.max_hp);
 						index_to_fighter[spatial] = entity;
+						fighter_to_link = entity;
 					}
 				}
+
+				if (fighter_to_link && location_to_link) {
+					container.force_create_fighter_location(fighter_to_link, location_to_link);
+				}
+
 			}
 			else if (iResult == 0) {
 				printf("Connection closed\n");
@@ -963,12 +988,6 @@ int main(void)
 		assert_no_errors();
 
 		glUseProgram(basic_shader);
-
-
-		assert_no_errors();
-
-		glm::mat4 model (1.f);
-		glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 		glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
 		glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
 
@@ -1106,14 +1125,6 @@ int main(void)
 
 		glBindVertexArray(object_mesh.vao);
 		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
-			// float rotation = time;
-			auto dx = cosf(time);
-			auto dy = sinf(time);
-
-			// container.thing_set_x(cid, container.thing_get_x(cid) + dx * dt);
-			// container.thing_set_y(cid, container.thing_get_y(cid) + dy * dt);
-			// container.thing_set_path_length(cid, container.thing_get_path_length(cid) + dt);
-
 			choose_rogue_sprite(
 				albedo_texture_location,
 				flip_location,
@@ -1131,6 +1142,56 @@ int main(void)
 				0,
 				4
 			);
+		});
+
+		// draw UI elements on top of characters
+		glUseProgram(flat_shader);
+		glUniformMatrix4fv(flat_view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
+		glUniformMatrix4fv(flat_projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
+
+		glBindVertexArray(object_mesh.vao);
+		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
+			auto fighter = container.visible_spatial_entity_get_fighter_from_fighter_location(cid);
+			if (!fighter) {
+				return;
+			}
+
+			auto hp = container.known_fighter_get_hp_current(fighter);
+			auto max_hp = container.known_fighter_get_hp_max(fighter);
+			auto width = float(hp) / float(max_hp);
+			auto shift = - width / 2.f;
+
+			//bg
+			{
+				glm::mat4 model (1.f);
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + 1.f, 1.f});
+				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
+				model = glm::scale(model, {0.5f, 0.1f, 0.1f});
+				glUniformMatrix4fv(flat_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniform4f(flat_albedo_location, 0.1f, 0.1f, 0.1f, 1.f);
+				glDrawArrays(
+					GL_TRIANGLE_STRIP,
+					0,
+					4
+				);
+			}
+
+			// top
+			if (max_hp > 0) {
+				glm::mat4 model (1.f);
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + 1.f, 1.001f});
+				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
+				model = glm::scale(model, {0.5f *width, 0.1f, 0.1f});
+				model = glm::translate(model, {-0.5, 0.f, 0.f});
+
+				glUniformMatrix4fv(flat_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniform4f(flat_albedo_location, 0.8f, 0.8f, 0.9f, 1.f);
+				glDrawArrays(
+					GL_TRIANGLE_STRIP,
+					0,
+					4
+				);
+			}
 		});
 
 		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
