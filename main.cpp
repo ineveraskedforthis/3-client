@@ -1,4 +1,5 @@
 #include "data_ids.hpp"
+#include <optional>
 #define GLM_FORCE_SWIZZLE
 #define GLEW_STATIC
 
@@ -7,6 +8,15 @@
 #include <GL/glew.h>
 #include <GLFW/glfw3.h>
 #include <stdexcept>
+
+#define DEFAULT_BUFLEN 512
+
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#include <stdio.h>
 
 #include <string>
 #include <string_view>
@@ -19,6 +29,9 @@
 #include "stb_image/stb_image.h"
 
 
+
+#include "unordered_dense.h"
+
 // Include all GLM core / GLSL features
 #include <glm/glm.hpp> // vec2, vec3, mat4, radians
 // Include all GLM extensions
@@ -27,6 +40,7 @@
 
 #include "imgui/backends/imgui_impl_glfw.h"
 #include "imgui/backends/imgui_impl_opengl3.h"
+#include "imgui/misc/cpp/imgui_stdlib.h"
 
 #include "data.hpp"
 
@@ -37,7 +51,6 @@
 constexpr inline float TILE_SIZE = 64.f;
 
 constexpr inline float GRASS_TILE_SIZE = 16.f;
-
 
 void APIENTRY glDebugOutput(
 	GLenum source,
@@ -201,6 +214,9 @@ void error_callback(int error, const char* description)
 static int current_move_x = 0;
 static int current_move_y = 0;
 
+static int prev_move_x = 0;
+static int prev_move_y = 0;
+
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
@@ -209,17 +225,17 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 
 	if (key == GLFW_KEY_UP) {
 		if (action == GLFW_PRESS) {
-			current_move_y += 1;
+			current_move_y += -1;
 		} else if (action == GLFW_RELEASE) {
-			current_move_y -= 1;
+			current_move_y -= -1;
 		}
 	}
 
 	if (key == GLFW_KEY_DOWN) {
 		if (action == GLFW_PRESS) {
-			current_move_y -= 1;
+			current_move_y -= -1;
 		} else if (action == GLFW_RELEASE) {
-			current_move_y += 1;
+			current_move_y += -1;
 		}
 	}
 
@@ -388,22 +404,49 @@ struct shader_2d_data {
 	GLuint aspect_ratio;
 };
 
+constexpr inline int ACTION_LOGIN = 0;
+struct action_update {
+	int action;
+	int player_id;
+	int fighter_id;
+	int entity_id;
+};
+
+struct position_update {
+	int timestamp;
+	int destination_player;
+	int spatial_entity_id;
+	float x;
+	float y;
+	float direction;
+	float speed;
+};
+struct command_data {
+	int32_t player;
+	int32_t target_entity;
+	float target_x;
+	float target_y;
+	uint8_t command_type;
+	uint8_t command_data;
+	uint8_t padding[2];
+};
+
 static dcon::data_container container {};
 
 int main(void)
 {
+
+	ankerl::unordered_dense::map<int, dcon::visible_spatial_entity_id> index_to_spatial_entity;
+	ankerl::unordered_dense::map<int, dcon::known_fighter_id> index_to_fighter;
+	std::optional<int> my_player_index;
+	std::optional<int> my_fighter_index;
+	std::optional<int> my_spatial_index;
 
 	std::default_random_engine rng;
 	std::uniform_real_distribution<float> uniform{0.0, 1.0};
 	std::normal_distribution<float> normal_d{0.f, 0.1f};
 	std::normal_distribution<float> size_d{1.f, 0.3f};
 
-
-	for (int count = 0; count < 20; count++) {
-		auto item = container.create_thing();
-		container.thing_set_x(item, cosf(float(count)));
-		container.thing_set_y(item, sinf(float(count)));
-	}
 
 	glfwSetErrorCallback(error_callback);
 	if (!glfwInit())
@@ -517,6 +560,91 @@ int main(void)
 	int tick = 0;
 	float data[512] {};
 
+
+	// Connection stuff
+	WSADATA wsaData;
+	int iResult;
+	// Initialize Winsock
+	iResult = WSAStartup(MAKEWORD(2,2), &wsaData);
+	if (iResult != 0) {
+		printf("WSAStartup failed: %d\n", iResult);
+		return 1;
+	}
+
+	addrinfo *result = NULL;
+	addrinfo *ptr = NULL;
+
+	addrinfo hints_tcp;
+	ZeroMemory( &hints_tcp, sizeof(hints_tcp) );
+	hints_tcp.ai_family   = AF_UNSPEC;
+	hints_tcp.ai_socktype = SOCK_STREAM;
+	hints_tcp.ai_protocol = IPPROTO_TCP;
+
+
+	addrinfo hints_udp;
+	ZeroMemory( &hints_udp, sizeof(hints_udp) );
+	hints_udp.ai_family   = AF_UNSPEC;
+	hints_udp.ai_socktype = SOCK_DGRAM;
+	hints_udp.ai_protocol = IPPROTO_UDP;
+
+	SOCKET ConnectSocketTCP = INVALID_SOCKET;
+	SOCKET ConnectSocketUDP = INVALID_SOCKET;
+
+	std::string connection_address = "127.0.0.1";
+	int connection_port = 8080;
+
+	char recvbuf[DEFAULT_BUFLEN];
+	int recvbuflen = DEFAULT_BUFLEN;
+
+	action_update action_received {};
+	position_update position_received {};
+
+	bool udp_socket_ready = false;
+
+	std::thread position_updates([&](){
+		while(1) {
+			if (!udp_socket_ready) {
+				Sleep(10);
+			}
+			iResult = recv(ConnectSocketUDP, recvbuf, recvbuflen, 0);
+			if (iResult > 0) {
+				// printf("Bytes received: %d\n", iResult);
+				memcpy(&position_received, recvbuf, sizeof(position_update));
+
+				auto spatial = position_received.spatial_entity_id;
+
+				auto it = index_to_spatial_entity.find(spatial);
+				if (it != index_to_spatial_entity.end()) {
+					auto entity = it->second;
+					container.visible_spatial_entity_set_direction(entity, position_received.direction);
+
+					auto last_x = container.visible_spatial_entity_get_x(entity);
+					auto last_y = container.visible_spatial_entity_get_y(entity);
+
+					auto distance = sqrtf((position_received.x - last_x) * (position_received.x - last_x) +  (position_received.y - last_y) * (position_received.y - last_y));
+					auto path = container.visible_spatial_entity_get_path_length(entity);
+					container.visible_spatial_entity_set_path_length(entity, path + distance);
+
+					container.visible_spatial_entity_set_x(entity, position_received.x);
+					container.visible_spatial_entity_set_y(entity, position_received.y);
+				} else {
+					auto entity = container.create_visible_spatial_entity();
+					container.visible_spatial_entity_set_direction(entity, position_received.direction);
+					container.visible_spatial_entity_set_path_length(entity, 0.f);
+					container.visible_spatial_entity_set_x(entity, position_received.x);
+					container.visible_spatial_entity_set_y(entity, position_received.y);
+
+					index_to_spatial_entity[spatial] = entity;
+				}
+			}
+			else if (iResult == 0) {
+				printf("Connection closed\n");
+			} else {
+				// timeout: do nothing
+			}
+		}
+	});
+
 	double last_time = glfwGetTime();
 	while (!glfwWindowShouldClose(window))
 	{
@@ -533,7 +661,7 @@ int main(void)
 		}
 
 		camera_speed *= exp(-dt * 10.f);
-		camera_speed += glm::vec2(float(current_move_x), float(current_move_y)) * dt;
+		// camera_speed += glm::vec2(float(current_move_x), float(current_move_y)) * dt;
 
 		camera_position.xy += camera_speed;
 
@@ -573,11 +701,148 @@ int main(void)
 			ImGui::SameLine();
 			ImGui::Text("counter = %d", counter);
 
+			ImGui::InputText("Server IP address", &connection_address);
+			ImGui::InputInt("Port", &connection_port);
+			if (ImGui::Button("Connect")) {
+				iResult = getaddrinfo(
+					connection_address.c_str(),
+					std::to_string(connection_port).c_str(),
+					&hints_tcp,
+					&result
+				);
+				if (iResult != 0) {
+					printf("getaddrinfo failed: %d\n", iResult);
+					WSACleanup();
+					return 1;
+				}
+				// Attempt to connect to the first address returned by
+				// the call to getaddrinfo
+				ptr=result;
+
+				// Create a SOCKET for connecting to server
+				ConnectSocketTCP = socket(
+					ptr->ai_family,
+					ptr->ai_socktype,
+					ptr->ai_protocol
+				);
+				if (ConnectSocketTCP == INVALID_SOCKET) {
+					printf("Error at socket(): %d\n", WSAGetLastError());
+					freeaddrinfo(result);
+					WSACleanup();
+					return 1;
+				}
+				iResult = connect( ConnectSocketTCP, ptr->ai_addr, (int)ptr->ai_addrlen);
+				if (iResult == SOCKET_ERROR) {
+					closesocket(ConnectSocketTCP);
+					ConnectSocketTCP = INVALID_SOCKET;
+				}
+				freeaddrinfo(result);
+				if (ConnectSocketTCP == INVALID_SOCKET) {
+					printf("Unable to connect to server!\n");
+					WSACleanup();
+					return 1;
+				}
+
+				printf("TCP Connected!\n");
+
+				// Create a SOCKET for connecting to server
+				ConnectSocketUDP = socket(
+					AF_INET,
+					SOCK_DGRAM,
+					IPPROTO_UDP
+				);
+				if (ConnectSocketUDP == INVALID_SOCKET) {
+					printf("Error at socket(): %d\n", WSAGetLastError());
+					freeaddrinfo(result);
+					WSACleanup();
+					return 1;
+				}
+				printf("UDP Socket created!\n");
+
+				int timeout = 1;
+				setsockopt(ConnectSocketTCP, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(int));
+				// setsockopt(ConnectSocketUDP, SOL_SOCKET, SO_RCVTIMEO, (char*)&timeout, sizeof(int));
+				u_long mode = 1;  // 1 to enable non-blocking socket
+				// ioctlsocket(ConnectSocketUDP, FIONBIO, &mode);
+				sockaddr_in dest;
+				// sockaddr_in local;
+
+				// local.sin_family = AF_INET;
+				// inet_pton(AF_INET, "127.0.0.1", &local.sin_addr.s_addr);
+				// local.sin_port = htons(0);
+
+				dest.sin_family = AF_INET;
+				inet_pton(AF_INET, connection_address.c_str(), &dest.sin_addr.s_addr);
+				dest.sin_port = htons(connection_port);
+
+				// auto iResult = bind(ConnectSocketUDP, (sockaddr *)&local, sizeof(local));
+				if (iResult == SOCKET_ERROR) {
+					closesocket(ConnectSocketTCP);
+					ConnectSocketTCP = INVALID_SOCKET;
+				}
+
+				// sendto(s, pkt, strlen(pkt), 0, (sockaddr *)&dest, sizeof(dest));
+
+				const char *sendbuf = "Subscribe";
+				for (int count = 0; count < 4; count++) {
+					iResult = sendto(ConnectSocketUDP, sendbuf, (int) strlen(sendbuf), 0,  (sockaddr *)&dest, sizeof(dest));
+					if (iResult == SOCKET_ERROR) {
+						printf("send failed: %d\n", WSAGetLastError());
+						closesocket(ConnectSocketUDP);
+						WSACleanup();
+						return 1;
+					}
+					printf("Bytes Sent: %d\n", iResult);
+				}
+				udp_socket_ready = true;
+			}
+
 			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			ImGui::End();
 		}
 
 		ImGui::Render();
+
+		//
+		if (ConnectSocketTCP != INVALID_SOCKET){
+			iResult = recv(ConnectSocketTCP, recvbuf, recvbuflen, 0);
+			if (iResult > 0) {
+				printf("Bytes received: %d\n", iResult);
+				memcpy(&action_received, recvbuf, sizeof(action_update));
+
+				if (action_received.action == ACTION_LOGIN) {
+					my_fighter_index = action_received.fighter_id;
+					my_spatial_index = action_received.entity_id;
+					my_player_index = action_received.player_id;
+					printf("I am %d at location %d", my_fighter_index.value(), my_spatial_index.value());
+				}
+			}
+			else if (iResult == 0) {
+				printf("Connection closed\n");
+			} else {
+				// timeout: do nothing
+			}
+
+			if (my_player_index && (prev_move_x != current_move_x || prev_move_y != current_move_y)) {
+
+				command_data data {};
+				data.player = my_player_index.value();
+				data.command_type = 0;
+				data.target_x = current_move_x;
+				data.target_y = current_move_y;
+
+				prev_move_x = current_move_x;
+				prev_move_y = current_move_y;
+
+				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command_data), 0);
+				if (iResult == SOCKET_ERROR) {
+					printf("send failed: %d\n", WSAGetLastError());
+					closesocket(ConnectSocketTCP);
+					WSACleanup();
+					return 1;
+				}
+			}
+		}
 
 
 		float near_plane = 0.1f;
@@ -765,25 +1030,25 @@ int main(void)
 		assert_no_errors();
 
 		glBindVertexArray(object_mesh.vao);
-		container.for_each_thing([&] (dcon::thing_id cid) {
-			float rotation = time;
+		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
+			// float rotation = time;
 			auto dx = cosf(time);
 			auto dy = sinf(time);
 
-			container.thing_set_x(cid, container.thing_get_x(cid) + dx * dt);
-			container.thing_set_y(cid, container.thing_get_y(cid) + dy * dt);
-			container.thing_set_path_length(cid, container.thing_get_path_length(cid) + dt);
+			// container.thing_set_x(cid, container.thing_get_x(cid) + dx * dt);
+			// container.thing_set_y(cid, container.thing_get_y(cid) + dy * dt);
+			// container.thing_set_path_length(cid, container.thing_get_path_length(cid) + dt);
 
 			choose_rogue_sprite(
 				albedo_texture_location,
 				flip_location,
-				rotation,
-				container.thing_get_path_length(cid),
+				container.visible_spatial_entity_get_direction(cid),
+				container.visible_spatial_entity_get_path_length(cid),
 				false
 			);
 
 			glm::mat4 model (1.f);
-			model = glm::translate(model, {container.thing_get_x(cid), -container.thing_get_y(cid), 0.01f});
+			model = glm::translate(model, {container.visible_spatial_entity_get_x(cid), -container.visible_spatial_entity_get_y(cid), 0.01f});
 			model = glm::scale(model, {1.f, 1.f, 1.f});
 			glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 			glDrawArrays(
@@ -800,7 +1065,12 @@ int main(void)
 		assert_no_errors();
 	}
 
-	// Cleanup
+	// Cleanup/
+
+	closesocket(ConnectSocketTCP);
+	closesocket(ConnectSocketUDP);
+	WSACleanup();
+
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
 	ImGui::DestroyContext();

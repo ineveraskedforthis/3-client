@@ -1,8 +1,8 @@
 global{no-conversions}
 
 object{
-	name{thing}
-	size{30000}
+	name{visible_spatial_entity}
+	size{300000}
 	storage_type{erasable}
 
 	property{
@@ -21,6 +21,13 @@ object{
 		name{path_length}
 		type{float}
 	}
+}
+
+object{
+	name{known_fighter}
+	size{30000}
+	storage_type{erasable}
+
 	property{
 		name{hp_display}
 		type{int}

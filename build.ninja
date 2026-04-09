@@ -7,7 +7,7 @@ dcon_includes_common = -I./DataContainer/CommonIncludes
 dcon_includes = -I./DataContainer/DataContainerGenerator
 
 includes = -I./glfw/include -I./glew-cmake/include -I./imgui -I./glm $dcon_includes_common
-libs = -l./glfw/build/src/glfw3 -l./glew-cmake/build/lib/libglew32d -lUser32.lib -lShell32 -lGdi32 -lopengl32
+libs = -l./glfw/build/src/glfw3 -l./glew-cmake/build/lib/libglew32d -lUser32.lib -lShell32 -lGdi32 -lopengl32 -lWs2_32
 
 rule ccpp
   command = $cpp_compiler $cpp_standard $optimisation_flag $debug_flags -mavx2 -MD -MF $out.d $includes -c $in -o $out
