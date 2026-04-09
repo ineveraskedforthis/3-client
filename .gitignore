@@ -2,6 +2,7 @@ glew-cmake*
 glfw*
 glm*
 imgui*
+implot*
 flags*
 .vscode*
 cache*

@@ -42,6 +42,9 @@
 #include "imgui/backends/imgui_impl_opengl3.h"
 #include "imgui/misc/cpp/imgui_stdlib.h"
 
+#include "implot/implot.h"
+#include "implot/implot_internal.h"
+
 #include "data.hpp"
 
 #include "frustum.hpp"
@@ -217,6 +220,9 @@ static int current_move_y = 0;
 static int prev_move_x = 0;
 static int prev_move_y = 0;
 
+static bool running = false;
+static bool prev_running = false;
+
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
@@ -252,6 +258,14 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 			current_move_x += 1;
 		} else if (action == GLFW_RELEASE) {
 			current_move_x -= 1;
+		}
+	}
+
+	if (key == GLFW_KEY_LEFT_SHIFT) {
+		if (action == GLFW_PRESS) {
+			running = true;
+		} else if (action == GLFW_RELEASE) {
+			running = false;
 		}
 	}
 }
@@ -414,14 +428,25 @@ struct action_update {
 
 struct position_update {
 	int timestamp;
-	int destination_player;
 	int spatial_entity_id;
 	float x;
 	float y;
 	float direction;
 	float speed;
+
+	int fighter_id;
+	float energy;
+	uint16_t hp;
+	uint16_t max_hp;
 };
-struct command_data {
+
+namespace command {
+
+inline constexpr uint8_t MOVE = 0;
+inline constexpr uint8_t RUN_START = 1;
+inline constexpr uint8_t RUN_STOP = 2;
+
+struct data {
 	int32_t player;
 	int32_t target_entity;
 	float target_x;
@@ -430,6 +455,8 @@ struct command_data {
 	uint8_t command_data;
 	uint8_t padding[2];
 };
+
+}
 
 static dcon::data_container container {};
 
@@ -441,6 +468,10 @@ int main(void)
 	std::optional<int> my_player_index;
 	std::optional<int> my_fighter_index;
 	std::optional<int> my_spatial_index;
+
+	float my_energy;
+	std::vector<float> energy_history;
+	energy_history.resize(60 * 10);
 
 	std::default_random_engine rng;
 	std::uniform_real_distribution<float> uniform{0.0, 1.0};
@@ -471,6 +502,7 @@ int main(void)
 
 	IMGUI_CHECKVERSION();
 	ImGui::CreateContext();
+	ImPlot::CreateContext();
 	ImGuiIO& io = ImGui::GetIO(); (void)io;
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;     // Enable Keyboard Controls
 	io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;      // Enable Gamepad Controls
@@ -547,6 +579,7 @@ int main(void)
 	float albedo_critter[] = {0.5f, 0.1f, 0.1f};
 
 	glm::vec3 camera_position{0.f, 0.f, 15.f};
+	glm::vec3 camera_target{0.f, 0.f, 15.f};
 
 	int width = 1;
 	int height = 1;
@@ -627,6 +660,12 @@ int main(void)
 
 					container.visible_spatial_entity_set_x(entity, position_received.x);
 					container.visible_spatial_entity_set_y(entity, position_received.y);
+
+					if (position_received.spatial_entity_id == my_spatial_index) {
+						camera_target.x = position_received.x;
+						camera_target.y = -position_received.y - 5.f;
+					}
+
 				} else {
 					auto entity = container.create_visible_spatial_entity();
 					container.visible_spatial_entity_set_direction(entity, position_received.direction);
@@ -635,6 +674,27 @@ int main(void)
 					container.visible_spatial_entity_set_y(entity, position_received.y);
 
 					index_to_spatial_entity[spatial] = entity;
+				}
+
+				if (position_received.fighter_id > -1) {
+					auto it2 = index_to_fighter.find(position_received.fighter_id);
+					if (it2 != index_to_fighter.end()) {
+						auto entity = it2->second;
+						container.known_fighter_set_hp_current(entity, position_received.hp);
+						container.known_fighter_set_hp_max(entity, position_received.max_hp);
+						if (position_received.fighter_id == my_fighter_index) {
+							my_energy = position_received.energy;
+							for (int index = 0; index < energy_history.size() - 1; index++) {
+								energy_history[index] = energy_history[index + 1];
+							}
+							energy_history.back() = my_energy;
+						}
+					} else {
+						auto entity = container.create_known_fighter();
+						container.known_fighter_set_hp_current(entity, position_received.hp);
+						container.known_fighter_set_hp_max(entity, position_received.max_hp);
+						index_to_fighter[spatial] = entity;
+					}
 				}
 			}
 			else if (iResult == 0) {
@@ -659,11 +719,8 @@ int main(void)
 		if (update_timer > 1.f / 60.f) {
 			update_timer = 0.f;
 		}
-
-		camera_speed *= exp(-dt * 10.f);
-		// camera_speed += glm::vec2(float(current_move_x), float(current_move_y)) * dt;
-
-		camera_position.xy += camera_speed;
+		camera_speed = camera_target.xy - camera_position.xy;
+		camera_position.xy += camera_speed * (1.f - exp(-dt * 10.f));
 
 		// if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
 		// 	ImGui_ImplGlfw_Sleep(10);
@@ -689,12 +746,10 @@ int main(void)
 
 			ImGui::Begin("Hello, world!");                          // Create a window called "Hello, world!" and append into it.
 
-			ImGui::Text("Test.");               // Display some text (you can use a format strings too)
-
-			ImGui::SliderFloat3("float", (float*)&light_direction, -1.0f, 1.0f);
-			light_direction = glm::normalize(light_direction);
-
-			ImGui::ColorEdit3("clear color", (float*)&ambient); // Edit 3 floats representing a color
+			if (ImPlot::BeginPlot("Character stats.")) {
+				ImPlot::PlotLine("Energy", energy_history.data(), energy_history.size());
+				ImPlot::EndPlot();
+			}
 
 			if (ImGui::Button("Button"))                            // Buttons return true when clicked (most widgets return true when edited/activated)
 				counter++;
@@ -703,7 +758,7 @@ int main(void)
 
 			ImGui::InputText("Server IP address", &connection_address);
 			ImGui::InputInt("Port", &connection_port);
-			if (ImGui::Button("Connect")) {
+			if (ConnectSocketTCP == INVALID_SOCKET && ImGui::Button("Connect")) {
 				iResult = getaddrinfo(
 					connection_address.c_str(),
 					std::to_string(connection_port).c_str(),
@@ -825,7 +880,7 @@ int main(void)
 
 			if (my_player_index && (prev_move_x != current_move_x || prev_move_y != current_move_y)) {
 
-				command_data data {};
+				command::data data {};
 				data.player = my_player_index.value();
 				data.command_type = 0;
 				data.target_x = current_move_x;
@@ -834,7 +889,27 @@ int main(void)
 				prev_move_x = current_move_x;
 				prev_move_y = current_move_y;
 
-				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command_data), 0);
+				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
+				if (iResult == SOCKET_ERROR) {
+					printf("send failed: %d\n", WSAGetLastError());
+					closesocket(ConnectSocketTCP);
+					WSACleanup();
+					return 1;
+				}
+			}
+
+			if (my_player_index && (prev_running != running)) {
+
+				command::data data {};
+				data.player = my_player_index.value();
+				if (running) {
+					data.command_type = command::RUN_START;
+				} else {
+					data.command_type = command::RUN_STOP;
+				}
+				prev_running = running;
+
+				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
 				if (iResult == SOCKET_ERROR) {
 					printf("send failed: %d\n", WSAGetLastError());
 					closesocket(ConnectSocketTCP);
@@ -1073,6 +1148,7 @@ int main(void)
 
 	ImGui_ImplOpenGL3_Shutdown();
 	ImGui_ImplGlfw_Shutdown();
+	ImPlot::DestroyContext();
 	ImGui::DestroyContext();
 
 	glfwDestroyWindow(window);
