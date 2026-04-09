@@ -1190,10 +1190,10 @@ int main(void)
 			// top
 			if (max_hp > 0) {
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + 1.f, 1.001f});
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + 1.f, 1.05f});
 				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
+				model = glm::translate(model, {-0.5 *(1.f - width), 0.f, 0.f});
 				model = glm::scale(model, {0.5f *width, 0.1f, 0.1f});
-				model = glm::translate(model, {-0.5, 0.f, 0.f});
 
 				glUniformMatrix4fv(flat_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 				glUniform4f(flat_albedo_location, 0.8f, 0.8f, 0.9f, 1.f);
