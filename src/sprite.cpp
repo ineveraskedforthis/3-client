@@ -17,6 +17,11 @@ static GLuint SPRITE_ROGUE_MOVE_BACK_1;
 static GLuint SPRITE_ROGUE_MOVE_BACK_2;
 static GLuint SPRITE_ROGUE_ATTACK;
 
+static GLuint SPRITE_RAT_BIG_MOVE_RIGHT_1;
+static GLuint SPRITE_RAT_BIG_MOVE_RIGHT_2;
+static GLuint SPRITE_RAT_BIG_ATTACK;
+
+
 static GLuint TILE_EARTH_RED;
 
 static GLuint SPRITE_GRASS[5] {};
@@ -74,6 +79,10 @@ void load_textures(){
 
 	new_basic_texture(SPRITE_TREE[0], "./assets/sprites/tree/1.png");
 	new_basic_texture(SPRITE_BUSH[0], "./assets/sprites/bush/1.png");
+
+	new_basic_texture(SPRITE_RAT_BIG_ATTACK, "./assets/sprites/rat-big/attack.png");
+	new_basic_texture(SPRITE_RAT_BIG_MOVE_RIGHT_1, "./assets/sprites/rat-big/right-1.png");
+	new_basic_texture(SPRITE_RAT_BIG_MOVE_RIGHT_2, "./assets/sprites/rat-big/right-2.png");
 }
 
 void choose_tile_texture(
@@ -117,6 +126,47 @@ void choose_bush_texture(
 	glUniform1i(texture_shader_location, 0);
 	glBindTexture(GL_TEXTURE_2D, SPRITE_BUSH[0]);
 }
+
+void
+choose_rat_sprite(
+	GLuint texture_shader_location,
+	GLuint texture_flip_location,
+	float direction,
+	float path_length,
+	bool action
+) {
+	glActiveTexture(GL_TEXTURE0);
+
+	auto dx = cosf(direction);
+	auto dy = sinf(direction);
+	auto step = floorf((fmodf(path_length, 0.4f)) / 0.2f);
+
+	glUniform1i(texture_flip_location, 0);
+	glUniform1i(texture_shader_location, 0);
+
+	if (action) {
+		glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_ATTACK);
+		if (dx < 0) {
+			glUniform1i(texture_flip_location, 1);
+		}
+	} else {
+		if (dx > 0.f) {
+			if (step == 0) {
+				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_1);
+			} else {
+				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_2);
+			}
+		} else {
+			glUniform1i(texture_flip_location, 1);
+			if (step == 0) {
+				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_1);
+			} else {
+				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_2);
+			}
+		}
+	}
+}
+
 void
 choose_rogue_sprite(
 	GLuint texture_shader_location,

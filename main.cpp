@@ -683,7 +683,7 @@ int main(void)
 
 					if (position_received.spatial_entity_id == my_spatial_index) {
 						camera_target.x = position_received.x;
-						camera_target.y = -position_received.y - 5.f;
+						camera_target.y = -position_received.y - 15.f;
 					}
 					location_to_link = entity;
 				} else {
@@ -957,14 +957,14 @@ int main(void)
 
 
 		float near_plane = 0.1f;
-		float far_plane = 20.f;
+		float far_plane = 80.f;
 		glm::mat4 view(1.f);
-		view = glm::rotate(view, -glm::pi<float>() / 9.f * 0.9f, {1.f, 0.f, 0.f});
+		view = glm::rotate(view, -glm::pi<float>() / 4.f, {1.f, 0.f, 0.f});
 		view = glm::translate(view, -camera_position);
 		// drawing shadow maps
 		std::vector<glm::mat4> shadow_projections;
 		glm::mat4 projection_full_range = glm::perspective(
-			glm::pi<float>() / 3.f, (1.f * width) / height, near_plane, far_plane
+			glm::pi<float>() / 4.f, (1.f * width) / height, near_plane, far_plane
 		);
 
 		assert_no_errors();
@@ -1015,7 +1015,7 @@ int main(void)
 		auto visible_tile_y = floor(-camera_position.y / TILE_SIZE);
 
 		for (float i = visible_tile_x - 2.f; i <= visible_tile_x + 2.f; i++) {
-			for (float j = visible_tile_y - 2.f; j <= visible_tile_y + 2.f; j++) {
+			for (float j = visible_tile_y-1.f;  j <= visible_tile_y + 1.f; j++) {
 				glm::mat4 model (1.f);
 				model = glm::translate(model, {i * TILE_SIZE, -j * TILE_SIZE, 0.f});
 				// glUniform3fv(albedo_location, 1, albedo_character);
@@ -1037,8 +1037,8 @@ int main(void)
 		auto visible_grass_tile_y = floor(-camera_position.y / GRASS_TILE_SIZE);
 
 		glBindVertexArray(grass_mesh.vao);
-		for (float i = visible_grass_tile_x - 2.f; i <= visible_grass_tile_x + 1.f; i++) {
-			for (float j = visible_grass_tile_y - 1.f; j <= visible_grass_tile_y + 1.f; j++) {
+		for (float i = visible_grass_tile_x - 3.f; i <= visible_grass_tile_x + 1.f; i++) {
+			for (float j = visible_grass_tile_y - 3.f; j <= visible_grass_tile_y; j++) {
 				glm::mat4 model (1.f);
 				// glUniform3fv(albedo_location, 1, albedo_character);
 
@@ -1136,17 +1136,30 @@ int main(void)
 
 		glBindVertexArray(object_mesh.vao);
 		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
-			choose_rogue_sprite(
-				albedo_texture_location,
-				flip_location,
-				container.visible_spatial_entity_get_direction(cid),
-				container.visible_spatial_entity_get_path_length(cid),
-				false
-			);
+			auto model_tag = container.visible_spatial_entity_get_model(cid);
+			auto size = 1.f;
+			if (model_tag == 0) {
+				choose_rat_sprite(
+					albedo_texture_location,
+					flip_location,
+					container.visible_spatial_entity_get_direction(cid),
+					container.visible_spatial_entity_get_path_length(cid),
+					false
+				);
+				size = 2.f;
+			} else  {
+				choose_rogue_sprite(
+					albedo_texture_location,
+					flip_location,
+					container.visible_spatial_entity_get_direction(cid),
+					container.visible_spatial_entity_get_path_length(cid),
+					false
+				);
+			}
 
 			glm::mat4 model (1.f);
 			model = glm::translate(model, {container.visible_spatial_entity_get_x(cid), -container.visible_spatial_entity_get_y(cid), 0.01f});
-			model = glm::scale(model, {1.f, 1.f, 1.f});
+			model = glm::scale(model, {size, size, size});
 			glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 			glDrawArrays(
 				GL_TRIANGLE_STRIP,
@@ -1167,6 +1180,13 @@ int main(void)
 				return;
 			}
 
+			auto model_tag = container.visible_spatial_entity_get_model(cid);
+			auto size = 1.f;
+			if (model_tag == 0) {
+				size = 2.f;
+			} else  {
+			}
+
 			auto hp = container.known_fighter_get_hp_current(fighter);
 			auto max_hp = container.known_fighter_get_hp_max(fighter);
 			auto width = float(hp) / float(max_hp);
@@ -1175,7 +1195,7 @@ int main(void)
 			//bg
 			{
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + 1.f, 1.f});
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.f + size});
 				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
 				model = glm::scale(model, {0.5f, 0.1f, 0.1f});
 				glUniformMatrix4fv(flat_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
@@ -1190,7 +1210,7 @@ int main(void)
 			// top
 			if (max_hp > 0) {
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + 1.f, 1.05f});
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.05f + size});
 				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
 				model = glm::translate(model, {-0.5 *(1.f - width), 0.f, 0.f});
 				model = glm::scale(model, {0.5f *width, 0.1f, 0.1f});

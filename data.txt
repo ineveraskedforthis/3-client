@@ -21,6 +21,11 @@ object{
 		name{path_length}
 		type{float}
 	}
+
+	property{
+		name{model}
+		type{uint8_t}
+	}
 }
 
 object{
@@ -40,6 +45,7 @@ object{
 		name{hp_max}
 		type{int}
 	}
+
 }
 
 relationship{

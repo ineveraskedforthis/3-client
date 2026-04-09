@@ -2,7 +2,14 @@
 #include <GL/glew.h>
 
 void load_textures();
-
+void
+choose_rat_sprite(
+	GLuint texture_shader_location,
+	GLuint texture_flip_location,
+	float direction,
+	float path_length,
+	bool action
+);
 void
 choose_rogue_sprite(
 	GLuint texture_shader_location,
