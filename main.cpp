@@ -290,6 +290,37 @@ static std::vector<vertex> world_object_horizontal_mesh = {
 	{{1.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 0.f}}
 };
 
+static std::vector<vertex> world_object_centered_mesh = {
+	{{-1.f, -1.f, 0.f}, {0.f, 0.f, 1.f}, {-1.f, -1.f}},
+	{{1.f, -1.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, -1.f}},
+	{{-1.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {-1.f, 1.f}},
+	{{1.f, 1.f, 0.f}, {0.f, 0.f, 1.f}, {1.f, 1.f}}
+};
+
+buffer_pair create_centered_square_buffer() {
+
+	GLuint vbo;
+	glGenBuffers(1, &vbo);
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glBufferData(GL_ARRAY_BUFFER, world_object_centered_mesh.size() * sizeof(vertex), world_object_centered_mesh.data(), GL_STATIC_DRAW);
+
+	GLuint vao;
+	glGenVertexArrays(1, &vao);
+	glBindVertexArray(vao);
+
+	glBindBuffer(GL_ARRAY_BUFFER, vbo);
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(0));
+
+	glEnableVertexAttribArray(1);
+	glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(sizeof(float) * 3));
+
+	glEnableVertexAttribArray(2);
+	glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(vertex),  reinterpret_cast<void*>(sizeof(float) * 3 + sizeof(float) * 3));
+
+	return {vao, vbo};
+}
+
 buffer_pair create_world_object_buffer() {
 
 	GLuint vbo;
@@ -460,6 +491,20 @@ struct data {
 
 static dcon::data_container container {};
 
+struct shader_basic_uniforms {
+	GLint model;
+	GLint view;
+	GLint projection;
+};
+
+shader_basic_uniforms get_basic_uniforms(GLuint shader) {
+	return {
+		glGetUniformLocation(shader, "model"),
+		glGetUniformLocation(shader, "view"),
+		glGetUniformLocation(shader, "projection")
+	};
+}
+
 int main(void)
 {
 
@@ -547,6 +592,7 @@ int main(void)
 
 
 	auto object_mesh = create_world_object_buffer();
+	auto centered_square = create_centered_square_buffer();
 	auto tile_mesh = create_world_tile_buffer();
 	auto grass_mesh = create_grass_buffer(rng, uniform);
 
@@ -565,26 +611,36 @@ int main(void)
 		create_shader(GL_VERTEX_SHADER, flat_vertex_shader_source.c_str()),
 		create_shader(GL_FRAGMENT_SHADER, flat_fragment_shader_source.c_str())
 	);
-	GLuint flat_model_location = glGetUniformLocation(flat_shader, "model");
-	GLuint flat_view_location = glGetUniformLocation(flat_shader, "view");
-	GLuint flat_projection_location = glGetUniformLocation(flat_shader, "projection");
+	shader_basic_uniforms flat_basic_location = get_basic_uniforms(flat_shader);
 	GLuint flat_albedo_location = glGetUniformLocation(flat_shader, "albedo");
 
+	// setting up a flat shader
+	std::string circle_shader_vertex_path = "./shaders/basic_shader_meshes.vert";
+	std::string circle_shader_fragment_path = "./shaders/circle.frag";
+	std::string circle_vertex_shader_source = read_shader( circle_shader_vertex_path );
+	std::string circle_fragment_shader_source = read_shader( circle_shader_fragment_path );
+	auto circle_shader = create_program(
+		create_shader(GL_VERTEX_SHADER, circle_vertex_shader_source.c_str()),
+		create_shader(GL_FRAGMENT_SHADER, circle_fragment_shader_source.c_str())
+	);
+	shader_basic_uniforms circle_basic_location = get_basic_uniforms(circle_shader);
+	GLuint circle_albedo_location = glGetUniformLocation(circle_shader, "albedo");
+	GLuint circle_direction_location = glGetUniformLocation(circle_shader, "direction");
+	GLuint circle_half_angle_location = glGetUniformLocation(circle_shader, "half_angle");
 
-	// setting up a basic shader
-	std::string basic_shader_vertex_path = "./shaders/basic_shader_meshes.vert";
-	std::string basic_shader_fragment_path = "./shaders/basic_shader_meshes.frag";
-	std::string vertex_shader_source = read_shader( basic_shader_vertex_path );
-	std::string fragment_shader_source = read_shader( basic_shader_fragment_path );
-	auto basic_shader = create_program(
+
+	// setting up a default shader
+	std::string default_shader_vertex_path = "./shaders/basic_shader_meshes.vert";
+	std::string default_shader_fragment_path = "./shaders/basic_shader_meshes.frag";
+	std::string vertex_shader_source = read_shader( default_shader_vertex_path );
+	std::string fragment_shader_source = read_shader( default_shader_fragment_path );
+	auto default_shader = create_program(
 		create_shader(GL_VERTEX_SHADER, vertex_shader_source.c_str()),
 		create_shader(GL_FRAGMENT_SHADER, fragment_shader_source.c_str())
 	);
-	GLuint model_location = glGetUniformLocation(basic_shader, "model");
-	GLuint view_location = glGetUniformLocation(basic_shader, "view");
-	GLuint projection_location = glGetUniformLocation(basic_shader, "projection");
-	GLuint albedo_texture_location = glGetUniformLocation(basic_shader, "albedo_texture");
-	GLuint flip_location = glGetUniformLocation(basic_shader, "flip");
+	shader_basic_uniforms default_basic_location = get_basic_uniforms(default_shader);
+	GLuint albedo_texture_location = glGetUniformLocation(default_shader, "albedo_texture");
+	GLuint flip_location = glGetUniformLocation(default_shader, "flip");
 
 	assert_no_errors();
 
@@ -775,6 +831,7 @@ int main(void)
 				ImPlot::SetupAxes("X","Y",flags,flags);
 				ImPlot::SetupAxesLimits(0,energy_history.size(),0,1);
 				ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, 1.f, 1.f);
+				ImPlot::SetupAxisZoomConstraints(ImAxis_X1, energy_history.size(), energy_history.size());
 				ImPlot::PlotLine("Energy", energy_history.data(), energy_history.size());
 				ImPlot::EndPlot();
 			}
@@ -998,9 +1055,9 @@ int main(void)
 
 		assert_no_errors();
 
-		glUseProgram(basic_shader);
-		glUniformMatrix4fv(view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
-		glUniformMatrix4fv(projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
+		glUseProgram(default_shader);
+		glUniformMatrix4fv(default_basic_location.view, 1, GL_FALSE, reinterpret_cast<float *>(&view));
+		glUniformMatrix4fv(default_basic_location.projection, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
 
 
 		/*
@@ -1023,7 +1080,7 @@ int main(void)
 				choose_tile_texture(albedo_texture_location, flip_location);
 
 				model = glm::scale(model, {TILE_SIZE, TILE_SIZE, 1.f});
-				glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniformMatrix4fv(default_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 				glDrawArrays(
 					GL_TRIANGLE_STRIP,
 					0,
@@ -1058,7 +1115,7 @@ int main(void)
 					glm::mat4 model (1.f);
 					model = glm::translate(model, {(i + dx) * GRASS_TILE_SIZE, -(j + dy) * GRASS_TILE_SIZE, 0.01f});
 					model = glm::scale(model, {1.0f, size, size});
-					glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+					glUniformMatrix4fv(default_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 					glDrawArrays(
 						GL_TRIANGLES,
 						0,
@@ -1090,7 +1147,7 @@ int main(void)
 					glm::mat4 model (1.f);
 					model = glm::translate(model, {(i + dx) * TILE_SIZE, -(j + dy) * TILE_SIZE, 0.01f});
 					model = glm::scale(model, {size, size, size});
-					glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+					glUniformMatrix4fv(default_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 					glDrawArrays(
 						GL_TRIANGLE_STRIP,
 						0,
@@ -1122,7 +1179,7 @@ int main(void)
 					glm::mat4 model (1.f);
 					model = glm::translate(model, {(i + dx) * TILE_SIZE, -(j + dy) * TILE_SIZE, 0.01f});
 					model = glm::scale(model, {size, size, size});
-					glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+					glUniformMatrix4fv(default_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 					glDrawArrays(
 						GL_TRIANGLE_STRIP,
 						0,
@@ -1160,7 +1217,7 @@ int main(void)
 			glm::mat4 model (1.f);
 			model = glm::translate(model, {container.visible_spatial_entity_get_x(cid), -container.visible_spatial_entity_get_y(cid), 0.01f});
 			model = glm::scale(model, {size, size, size});
-			glUniformMatrix4fv(model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+			glUniformMatrix4fv(default_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 			glDrawArrays(
 				GL_TRIANGLE_STRIP,
 				0,
@@ -1168,10 +1225,44 @@ int main(void)
 			);
 		});
 
-		// draw UI elements on top of characters
+		// draw "immersive" UI elements
+		glUseProgram(circle_shader);
+		glUniformMatrix4fv(circle_basic_location.view, 1, GL_FALSE, reinterpret_cast<float *>(&view));
+		glUniformMatrix4fv(circle_basic_location.projection, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
+
+		glBindVertexArray(centered_square.vao);
+		container.for_each_known_fighter([&](dcon::known_fighter_id fighter){
+			auto spatial = container.known_fighter_get_spatial_entity_from_fighter_location(fighter);
+			if (!spatial) return;
+			auto model_tag = container.visible_spatial_entity_get_model(spatial);
+			auto size = 1.f;
+			if (model_tag == 0) {
+				size = 2.f;
+			} else  {
+			}
+
+
+			// circle under
+			{
+				glm::mat4 model (1.f);
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(spatial), -container.visible_spatial_entity_get_y(spatial), 0.5f});
+				model = glm::scale(model, {size, size, size});
+				glUniformMatrix4fv(circle_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniform4f(circle_albedo_location, 1.0f, 1.0f, 0.1f, 0.8f);
+				glUniform1f(circle_direction_location, container.visible_spatial_entity_get_direction(spatial));
+				glUniform1f(circle_half_angle_location, glm::pi<float>() / 4.f);
+				glDrawArrays(
+					GL_TRIANGLE_STRIP,
+					0,
+					4
+				);
+			}
+		});
+
+
 		glUseProgram(flat_shader);
-		glUniformMatrix4fv(flat_view_location, 1, GL_FALSE, reinterpret_cast<float *>(&view));
-		glUniformMatrix4fv(flat_projection_location, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
+		glUniformMatrix4fv(flat_basic_location.view, 1, GL_FALSE, reinterpret_cast<float *>(&view));
+		glUniformMatrix4fv(flat_basic_location.projection, 1, GL_FALSE, reinterpret_cast<float *>(&projection_full_range));
 
 		glBindVertexArray(object_mesh.vao);
 		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
@@ -1198,7 +1289,7 @@ int main(void)
 				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.f + size});
 				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
 				model = glm::scale(model, {0.5f, 0.1f, 0.1f});
-				glUniformMatrix4fv(flat_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniformMatrix4fv(flat_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 				glUniform4f(flat_albedo_location, 0.1f, 0.1f, 0.1f, 1.f);
 				glDrawArrays(
 					GL_TRIANGLE_STRIP,
@@ -1215,8 +1306,8 @@ int main(void)
 				model = glm::translate(model, {-0.5 *(1.f - width), 0.f, 0.f});
 				model = glm::scale(model, {0.5f *width, 0.1f, 0.1f});
 
-				glUniformMatrix4fv(flat_model_location, 1, GL_FALSE, reinterpret_cast<float *>(&model));
-				glUniform4f(flat_albedo_location, 0.8f, 0.8f, 0.9f, 1.f);
+				glUniformMatrix4fv(flat_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniform4f(flat_albedo_location, 0.48f, 0.6f, 0.95f, 1.f);
 				glDrawArrays(
 					GL_TRIANGLE_STRIP,
 					0,
