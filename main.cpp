@@ -468,25 +468,82 @@ struct action_update {
 	int entity_id;
 };
 
-struct position_update {
-	int timestamp;
+inline constexpr uint8_t UPDATE_SPATIAL = 0;
+inline constexpr uint8_t UPDATE_FIGHTER = 1;
+inline constexpr uint8_t UPDATE_RELINK = 2;
+inline constexpr uint8_t UPDATE_HIGH_PRECISION = 3;
 
+struct high_precision_update {
+	// 4 bytes
 	int spatial_entity_id;
-	float x;
-	float y;
-	float direction;
-	float speed;
 
+	// 4 bytes
+	float x;
+
+	// 4 bytes
+	float y;
+};
+static_assert(sizeof(high_precision_update) == 12);
+
+struct spatial_update {
+	// 4 bytes
+	int spatial_entity_id;
+
+	// 4 bytes
+	int16_t x;
+	int16_t y;
+
+	// 4 bytes
+	uint8_t direction;
+	uint8_t padding[3];
+};
+static_assert(sizeof(spatial_update) == 12);
+
+struct fighter_update {
+	// 4 bytes
 	int fighter_id;
-	float energy;
-	float attack_energy;
+
+	// 4 bytes
 	int16_t hp;
 	int16_t max_hp;
 
+	// 4 bytes
+	uint8_t energy;
+	uint8_t attack_energy;
 	uint8_t model;
 	uint8_t weapon_type;
-	uint8_t padding[2];
 };
+static_assert(sizeof(fighter_update) == 12);
+
+struct relink_update {
+	// 4 bytes
+	int fighter_id;
+
+	// 4 bytes
+	int spatial_id;
+
+	// 4 bytes
+	uint8_t padding[4];
+};
+static_assert(sizeof(relink_update) == 12);
+
+struct udp_update {
+	// 4 bytes
+	uint8_t update_type;
+	uint8_t padding[3];
+
+	// 4 bytes
+	int timestamp;
+
+	// 12 bytes
+	union {
+		spatial_update spatial;
+		fighter_update fighter;
+		relink_update relink;
+		high_precision_update high_precision;
+	} payload;
+};
+static_assert(sizeof(udp_update) == 20);
 
 
 namespace command {
@@ -496,6 +553,7 @@ inline constexpr uint8_t RUN_START = 1;
 inline constexpr uint8_t RUN_STOP = 2;
 inline constexpr uint8_t ATTACK_START = 3;
 inline constexpr uint8_t ATTACK_STOP = 4;
+inline constexpr uint8_t RESPAWN = 5;
 
 struct data {
 	int32_t player;
@@ -533,6 +591,8 @@ int main(void)
 	std::optional<int> my_player_index;
 	std::optional<int> my_fighter_index;
 	std::optional<int> my_spatial_index;
+	float my_x;
+	float my_y;
 
 	float my_energy;
 	std::vector<float> energy_history;
@@ -722,11 +782,15 @@ int main(void)
 	int recvbuflen = DEFAULT_BUFLEN;
 
 	action_update action_received {};
-	position_update position_received {};
+	udp_update position_received {};
 
 	bool udp_socket_ready = false;
 
 	std::thread position_updates([&](){
+		int last_timestamp_spatial = -1;
+		int last_timestamp_fighter= -1;
+		int last_timestamp_relink= -1;
+		int last_timestamp_high_precision= -1;
 		while(1) {
 			if (!udp_socket_ready) {
 				Sleep(10);
@@ -734,55 +798,57 @@ int main(void)
 			iResult = recv(ConnectSocketUDP, recvbuf, recvbuflen, 0);
 			if (iResult > 0) {
 				// printf("Bytes received: %d\n", iResult);
-				memcpy(&position_received, recvbuf, sizeof(position_update));
+				memcpy(&position_received, recvbuf, sizeof(udp_update));
 
-				auto spatial = position_received.spatial_entity_id;
 
-				dcon::visible_spatial_entity_id location_to_link{};
-				dcon::known_fighter_id fighter_to_link{};
-
-				auto it = index_to_spatial_entity.find(spatial);
-				if (it != index_to_spatial_entity.end()) {
-					auto entity = it->second;
-					container.visible_spatial_entity_set_direction(entity, position_received.direction);
-
-					auto last_x = container.visible_spatial_entity_get_x(entity);
-					auto last_y = container.visible_spatial_entity_get_y(entity);
-
-					auto distance = sqrtf((position_received.x - last_x) * (position_received.x - last_x) +  (position_received.y - last_y) * (position_received.y - last_y));
-					auto path = container.visible_spatial_entity_get_path_length(entity);
-					// if (distance > 0.01f) {
-						distance /= 3.f;
-					// }
-					container.visible_spatial_entity_set_path_length(entity, path + distance);
-
-					container.visible_spatial_entity_set_x(entity, position_received.x);
-					container.visible_spatial_entity_set_y(entity, position_received.y);
-
-					if (position_received.spatial_entity_id == my_spatial_index) {
-						camera_target.x = position_received.x;
-						camera_target.y = -position_received.y - 15.f;
+				if (position_received.update_type == UPDATE_SPATIAL) {
+					if (position_received.timestamp < last_timestamp_spatial && last_timestamp_spatial < position_received.timestamp + 16000) {
+						continue;
+					} else {
+						last_timestamp_spatial = position_received.timestamp;
 					}
-					location_to_link = entity;
-				} else {
-					auto entity = container.create_visible_spatial_entity();
-					container.visible_spatial_entity_set_direction(entity, position_received.direction);
-					container.visible_spatial_entity_set_path_length(entity, 0.f);
-					container.visible_spatial_entity_set_x(entity, position_received.x);
-					container.visible_spatial_entity_set_y(entity, position_received.y);
-
-					index_to_spatial_entity[spatial] = entity;
-					location_to_link = entity;
-				}
-
-				if (position_received.fighter_id > -1) {
-					auto it2 = index_to_fighter.find(position_received.fighter_id);
+					auto spatial = position_received.payload.spatial;
+					auto it = index_to_spatial_entity.find(spatial.spatial_entity_id);
+					if (it != index_to_spatial_entity.end()) {
+						auto entity = it->second;
+						container.visible_spatial_entity_set_direction(entity, ((float)spatial.direction * 2.f  * glm::pi<float>()) / 255.f);
+						auto last_x = container.visible_spatial_entity_get_x(entity);
+						auto last_y = container.visible_spatial_entity_get_y(entity);
+						auto next_x = my_x + (float)spatial.x / 100.f;
+						auto next_y = my_y + (float)spatial.y / 100.f;
+						auto shift_x = next_x - last_x;
+						auto shift_y = next_y - last_y;
+						auto distance = sqrtf(shift_x * shift_x +  shift_y * shift_y);
+						auto path = container.visible_spatial_entity_get_path_length(entity);
+						if (spatial.spatial_entity_id != my_spatial_index) {
+							container.visible_spatial_entity_set_path_length(entity, path + distance * 0.5f);
+							container.visible_spatial_entity_set_x(entity, last_x + shift_x * 0.5f);
+							container.visible_spatial_entity_set_y(entity, last_y + shift_y * 0.5f);
+						}
+					} else {
+						auto next_x = my_x + (float)spatial.x / 100.f;
+						auto next_y = my_y + (float)spatial.y / 100.f;
+						auto entity = container.create_visible_spatial_entity();
+						container.visible_spatial_entity_set_direction(entity, ((float)spatial.direction * 2.f  * glm::pi<float>()) / 255.f);
+						container.visible_spatial_entity_set_path_length(entity, 0.f);
+						container.visible_spatial_entity_set_x(entity, next_x);
+						container.visible_spatial_entity_set_y(entity, next_y);
+						index_to_spatial_entity[spatial.spatial_entity_id] = entity;
+					}
+				} else if (position_received.update_type == UPDATE_FIGHTER) {
+					if (position_received.timestamp < last_timestamp_fighter && last_timestamp_fighter < position_received.timestamp + 16000) {
+						continue;
+					} else {
+						last_timestamp_fighter = position_received.timestamp;
+					}
+					auto payload = position_received.payload.fighter;
+					auto it2 = index_to_fighter.find(payload.fighter_id);
 					if (it2 != index_to_fighter.end()) {
 						auto entity = it2->second;
-						container.known_fighter_set_hp_current(entity, position_received.hp);
-						container.known_fighter_set_hp_max(entity, position_received.max_hp);
-						if (position_received.fighter_id == my_fighter_index) {
-							my_energy = position_received.energy;
+						container.known_fighter_set_hp_current(entity, payload.hp);
+						container.known_fighter_set_hp_max(entity, payload.max_hp);
+						if (payload.fighter_id == my_fighter_index) {
+							my_energy = (float)payload.energy / 255.f;
 							for (int index = 0; index < energy_history.size() - 1; index++) {
 								energy_history[index] = energy_history[index + 1];
 							}
@@ -790,25 +856,58 @@ int main(void)
 							for (int index = 0; index < attack_energy_history.size() - 1; index++) {
 								attack_energy_history[index] = attack_energy_history[index + 1];
 							}
-							attack_energy_history.back() = position_received.attack_energy;
+							attack_energy_history.back() = (float)payload.attack_energy / 255.f;
 						}
 
-						container.known_fighter_set_attack_energy(entity, position_received.attack_energy);
-						fighter_to_link = entity;
+						container.known_fighter_set_attack_energy(entity,  (float)payload.attack_energy / 255.f);
 					} else {
 						auto entity = container.create_known_fighter();
-						container.known_fighter_set_hp_current(entity, position_received.hp);
-						container.known_fighter_set_hp_max(entity, position_received.max_hp);
-						container.known_fighter_set_attack_energy(entity, position_received.attack_energy);
-						index_to_fighter[position_received.fighter_id] = entity;
-						fighter_to_link = entity;
+						container.known_fighter_set_hp_current(entity, payload.hp);
+						container.known_fighter_set_hp_max(entity, payload.max_hp);
+						container.known_fighter_set_attack_energy(entity, (float)payload.attack_energy / 255.f);
+						index_to_fighter[payload.fighter_id] = entity;
+					}
+				} else if (position_received.update_type == UPDATE_RELINK) {
+					if (position_received.timestamp < last_timestamp_relink && last_timestamp_relink < position_received.timestamp + 16000) {
+						continue;
+					} else {
+						last_timestamp_relink = position_received.timestamp;
+					}
+					auto it = index_to_spatial_entity.find(position_received.payload.relink.spatial_id);
+					auto it2 = index_to_fighter.find(position_received.payload.relink.fighter_id);
+					if (
+						it != index_to_spatial_entity.end()
+						&& it2 != index_to_fighter.end()
+					) {
+						container.force_create_fighter_location(it2->second, it->second);
+					}
+				} else if (position_received.update_type == UPDATE_HIGH_PRECISION) {
+					if (position_received.timestamp < last_timestamp_high_precision && last_timestamp_high_precision < position_received.timestamp + 16000) {
+						continue;
+					} else {
+						last_timestamp_high_precision = position_received.timestamp;
+					}
+					auto it = index_to_spatial_entity.find(position_received.payload.high_precision.spatial_entity_id);
+
+					if (position_received.payload.high_precision.spatial_entity_id == my_spatial_index && it != index_to_spatial_entity.end()) {
+						auto prev_x = container.visible_spatial_entity_get_x(it->second);
+						auto prev_y = container.visible_spatial_entity_get_y(it->second);
+						auto shift_x = position_received.payload.high_precision.x - prev_x;
+						auto shift_y = position_received.payload.high_precision.y - prev_y;
+						auto distance = sqrtf(shift_x * shift_x +  shift_y * shift_y);
+						auto path = container.visible_spatial_entity_get_path_length(it->second);
+						container.visible_spatial_entity_set_path_length(it->second, path + distance * 0.3f);
+
+						container.visible_spatial_entity_set_x(it->second, prev_x + shift_x * 0.3f);
+						container.visible_spatial_entity_set_y(it->second, prev_y + shift_y * 0.3f);
+
+						my_x = position_received.payload.high_precision.x;
+						my_y = position_received.payload.high_precision.y;
+
+						camera_target.x = my_x;
+						camera_target.y = -my_y - 15.f;
 					}
 				}
-
-				if (fighter_to_link && location_to_link) {
-					container.force_create_fighter_location(fighter_to_link, location_to_link);
-				}
-
 			}
 			else if (iResult == 0) {
 				printf("Connection closed\n");
@@ -973,6 +1072,20 @@ int main(void)
 					printf("Bytes Sent: %d\n", iResult);
 				}
 				udp_socket_ready = true;
+			}
+
+			if (ConnectSocketTCP != INVALID_SOCKET && ImGui::Button("Respawn")) {
+				command::data data {};
+				data.player = my_player_index.value();
+				data.command_type = command::RESPAWN;
+
+				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
+				if (iResult == SOCKET_ERROR) {
+					printf("send failed: %d\n", WSAGetLastError());
+					closesocket(ConnectSocketTCP);
+					WSACleanup();
+					return 1;
+				}
 			}
 
 			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);

@@ -1,8 +1,8 @@
 cpp_compiler = clang++
 cpp_standard = -std=c++20
-optimisation_flag = -O0
-debug_flags = -g -gdwarf-3 -gcodeview
-debug_flags_link = -g -gdwarf-3
+optimisation_flag = -O2
+#debug_flags = -g -gdwarf-3 -gcodeview
+#debug_flags_link = -g -gdwarf-3
 dcon_includes_common = -I./DataContainer/CommonIncludes
 dcon_includes = -I./DataContainer/DataContainerGenerator
 

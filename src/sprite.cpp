@@ -145,7 +145,7 @@ choose_rat_sprite(
 
 	auto dx = cosf(direction);
 	auto dy = sinf(direction);
-	auto step = floorf((fmodf(path_length, 0.4f)) / 0.2f);
+	auto step = floorf((fmodf(path_length, 2.f)) / 1.f);
 
 	glUniform1i(texture_flip_location, 0);
 	glUniform1i(texture_shader_location, 0);
