@@ -6,8 +6,10 @@ void
 choose_rat_sprite(
 	GLuint texture_shader_location,
 	GLuint texture_flip_location,
+	int index,
 	float direction,
 	float path_length,
+	float hp_ratio,
 	bool action
 );
 void
@@ -16,6 +18,7 @@ choose_rogue_sprite(
 	GLuint texture_flip_location,
 	float direction,
 	float path_length,
+	float hp_ratio,
 	bool action
 ) ;
 

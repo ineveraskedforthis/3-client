@@ -45,6 +45,10 @@ object{
 		name{hp_max}
 		type{int}
 	}
+	property{
+		name{attack_energy}
+		type{float}
+	}
 
 }
 

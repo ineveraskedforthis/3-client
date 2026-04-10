@@ -20,6 +20,8 @@ static GLuint SPRITE_ROGUE_ATTACK;
 static GLuint SPRITE_RAT_BIG_MOVE_RIGHT_1;
 static GLuint SPRITE_RAT_BIG_MOVE_RIGHT_2;
 static GLuint SPRITE_RAT_BIG_ATTACK;
+static GLuint SPRITE_RAT_BIG_DEAD_1;
+static GLuint SPRITE_RAT_BIG_DEAD_2;
 
 
 static GLuint TILE_EARTH_RED;
@@ -83,6 +85,8 @@ void load_textures(){
 	new_basic_texture(SPRITE_RAT_BIG_ATTACK, "./assets/sprites/rat-big/attack.png");
 	new_basic_texture(SPRITE_RAT_BIG_MOVE_RIGHT_1, "./assets/sprites/rat-big/right-1.png");
 	new_basic_texture(SPRITE_RAT_BIG_MOVE_RIGHT_2, "./assets/sprites/rat-big/right-2.png");
+	new_basic_texture(SPRITE_RAT_BIG_DEAD_1, "./assets/sprites/rat-big/dead-1.png");
+	new_basic_texture(SPRITE_RAT_BIG_DEAD_2, "./assets/sprites/rat-big/dead-2.png");
 }
 
 void choose_tile_texture(
@@ -131,8 +135,10 @@ void
 choose_rat_sprite(
 	GLuint texture_shader_location,
 	GLuint texture_flip_location,
+	int index,
 	float direction,
 	float path_length,
+	float hp_ratio,
 	bool action
 ) {
 	glActiveTexture(GL_TEXTURE0);
@@ -144,25 +150,32 @@ choose_rat_sprite(
 	glUniform1i(texture_flip_location, 0);
 	glUniform1i(texture_shader_location, 0);
 
-	if (action) {
+	if (hp_ratio <= 0.f) {
+		if (index % 2 ==0) {
+			glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_DEAD_1);
+		} else {
+			glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_DEAD_2);
+		}
+		if (dx < 0) {
+			glUniform1i(texture_flip_location, 1);
+		}
+	} else  if (action) {
 		glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_ATTACK);
 		if (dx < 0) {
 			glUniform1i(texture_flip_location, 1);
 		}
-	} else {
-		if (dx > 0.f) {
-			if (step == 0) {
-				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_1);
-			} else {
-				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_2);
-			}
+	} else if (dx > 0.f) {
+		if (step == 0) {
+			glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_1);
 		} else {
-			glUniform1i(texture_flip_location, 1);
-			if (step == 0) {
-				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_1);
-			} else {
-				glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_2);
-			}
+			glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_2);
+		}
+	} else {
+		glUniform1i(texture_flip_location, 1);
+		if (step == 0) {
+			glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_1);
+		} else {
+			glBindTexture(GL_TEXTURE_2D, SPRITE_RAT_BIG_MOVE_RIGHT_2);
 		}
 	}
 }
@@ -173,6 +186,7 @@ choose_rogue_sprite(
 	GLuint texture_flip_location,
 	float direction,
 	float path_length,
+	float hp_ratio,
 	bool action
 ) {
 

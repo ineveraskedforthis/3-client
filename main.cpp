@@ -223,6 +223,9 @@ static int prev_move_y = 0;
 static bool running = false;
 static bool prev_running = false;
 
+static bool attacking = false;
+static bool prev_attacking = false;
+
 static void key_callback(GLFWwindow* window, int key, int scancode, int action, int mods)
 {
 	if (key == GLFW_KEY_ESCAPE && action == GLFW_PRESS) {
@@ -266,6 +269,14 @@ static void key_callback(GLFWwindow* window, int key, int scancode, int action, 
 			running = true;
 		} else if (action == GLFW_RELEASE) {
 			running = false;
+		}
+	}
+
+	if (key == GLFW_KEY_SPACE) {
+		if (action == GLFW_PRESS) {
+			attacking = true;
+		} else if (action == GLFW_RELEASE) {
+			attacking = false;
 		}
 	}
 }
@@ -459,6 +470,7 @@ struct action_update {
 
 struct position_update {
 	int timestamp;
+
 	int spatial_entity_id;
 	float x;
 	float y;
@@ -467,15 +479,23 @@ struct position_update {
 
 	int fighter_id;
 	float energy;
-	uint16_t hp;
-	uint16_t max_hp;
+	float attack_energy;
+	int16_t hp;
+	int16_t max_hp;
+
+	uint8_t model;
+	uint8_t weapon_type;
+	uint8_t padding[2];
 };
+
 
 namespace command {
 
 inline constexpr uint8_t MOVE = 0;
 inline constexpr uint8_t RUN_START = 1;
 inline constexpr uint8_t RUN_STOP = 2;
+inline constexpr uint8_t ATTACK_START = 3;
+inline constexpr uint8_t ATTACK_STOP = 4;
 
 struct data {
 	int32_t player;
@@ -517,6 +537,8 @@ int main(void)
 	float my_energy;
 	std::vector<float> energy_history;
 	energy_history.resize(60 * 10);
+	std::vector<float> attack_energy_history;
+	attack_energy_history.resize(60 * 10);
 
 	std::default_random_engine rng;
 	std::uniform_real_distribution<float> uniform{0.0, 1.0};
@@ -729,9 +751,9 @@ int main(void)
 
 					auto distance = sqrtf((position_received.x - last_x) * (position_received.x - last_x) +  (position_received.y - last_y) * (position_received.y - last_y));
 					auto path = container.visible_spatial_entity_get_path_length(entity);
-					if (distance > 0.01f) {
+					// if (distance > 0.01f) {
 						distance /= 3.f;
-					}
+					// }
 					container.visible_spatial_entity_set_path_length(entity, path + distance);
 
 					container.visible_spatial_entity_set_x(entity, position_received.x);
@@ -765,12 +787,19 @@ int main(void)
 								energy_history[index] = energy_history[index + 1];
 							}
 							energy_history.back() = my_energy;
+							for (int index = 0; index < attack_energy_history.size() - 1; index++) {
+								attack_energy_history[index] = attack_energy_history[index + 1];
+							}
+							attack_energy_history.back() = position_received.attack_energy;
 						}
+
+						container.known_fighter_set_attack_energy(entity, position_received.attack_energy);
 						fighter_to_link = entity;
 					} else {
 						auto entity = container.create_known_fighter();
 						container.known_fighter_set_hp_current(entity, position_received.hp);
 						container.known_fighter_set_hp_max(entity, position_received.max_hp);
+						container.known_fighter_set_attack_energy(entity, position_received.attack_energy);
 						index_to_fighter[position_received.fighter_id] = entity;
 						fighter_to_link = entity;
 					}
@@ -829,10 +858,11 @@ int main(void)
 			if (ImPlot::BeginPlot("Energy")) {
 				static ImPlotAxisFlags flags;
 				ImPlot::SetupAxes("X","Y",flags,flags);
-				ImPlot::SetupAxesLimits(0,energy_history.size(),0,1);
-				ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, 1.f, 1.f);
+				ImPlot::SetupAxesLimits(0,energy_history.size(),0,2);
+				ImPlot::SetupAxisZoomConstraints(ImAxis_Y1, 2.f, 2.f);
 				ImPlot::SetupAxisZoomConstraints(ImAxis_X1, energy_history.size(), energy_history.size());
-				ImPlot::PlotLine("Energy", energy_history.data(), energy_history.size());
+				ImPlot::PlotLine("Available", energy_history.data(), energy_history.size());
+				ImPlot::PlotLine("Attack", attack_energy_history.data(), attack_energy_history.size());
 				ImPlot::EndPlot();
 			}
 			ImGui::End();
@@ -1001,6 +1031,26 @@ int main(void)
 					data.command_type = command::RUN_STOP;
 				}
 				prev_running = running;
+
+				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
+				if (iResult == SOCKET_ERROR) {
+					printf("send failed: %d\n", WSAGetLastError());
+					closesocket(ConnectSocketTCP);
+					WSACleanup();
+					return 1;
+				}
+			}
+
+			if (my_player_index && (prev_attacking != attacking)) {
+
+				command::data data {};
+				data.player = my_player_index.value();
+				if (attacking) {
+					data.command_type = command::ATTACK_START;
+				} else {
+					data.command_type = command::ATTACK_STOP;
+				}
+				prev_attacking = attacking;
 
 				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
 				if (iResult == SOCKET_ERROR) {
@@ -1195,13 +1245,30 @@ int main(void)
 		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
 			auto model_tag = container.visible_spatial_entity_get_model(cid);
 			auto size = 1.f;
+
+			auto fighter = container.visible_spatial_entity_get_fighter_from_fighter_location(cid);
+
+			bool action = false;
+			if (fighter) {
+				action = container.known_fighter_get_attack_energy(fighter) > 0;
+			}
+
+			float hp_ratio = 1.f;
+			if (fighter) {
+				auto hp = container.known_fighter_get_hp_current(fighter);
+				auto max_hp = container.known_fighter_get_hp_max(fighter);
+				hp_ratio = (float) hp / (float) max_hp;
+			}
+
 			if (model_tag == 0) {
 				choose_rat_sprite(
 					albedo_texture_location,
 					flip_location,
+					fighter.index(),
 					container.visible_spatial_entity_get_direction(cid),
 					container.visible_spatial_entity_get_path_length(cid),
-					false
+					hp_ratio,
+					action
 				);
 				size = 2.f;
 			} else  {
@@ -1210,7 +1277,8 @@ int main(void)
 					flip_location,
 					container.visible_spatial_entity_get_direction(cid),
 					container.visible_spatial_entity_get_path_length(cid),
-					false
+					hp_ratio,
+					action
 				);
 			}
 
@@ -1240,6 +1308,9 @@ int main(void)
 				size = 2.f;
 			} else  {
 			}
+
+			auto hp = container.known_fighter_get_hp_current(fighter);
+			if (hp <= 0) return;
 
 
 			// circle under
@@ -1283,6 +1354,8 @@ int main(void)
 			auto width = float(hp) / float(max_hp);
 			auto shift = - width / 2.f;
 
+			if (hp <= 0) return;
+
 			//bg
 			{
 				glm::mat4 model (1.f);
@@ -1303,11 +1376,44 @@ int main(void)
 				glm::mat4 model (1.f);
 				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.05f + size});
 				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
-				model = glm::translate(model, {-0.5 *(1.f - width), 0.f, 0.f});
-				model = glm::scale(model, {0.5f *width, 0.1f, 0.1f});
+				model = glm::scale(model, {0.5f * width, 0.1f, 0.1f});
 
 				glUniformMatrix4fv(flat_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 				glUniform4f(flat_albedo_location, 0.48f, 0.6f, 0.95f, 1.f);
+				glDrawArrays(
+					GL_TRIANGLE_STRIP,
+					0,
+					4
+				);
+			}
+
+			// attack strength
+			for (int i = 1; i < container.known_fighter_get_attack_energy(fighter) / 0.125; i++) {
+
+				glm::mat4 model (1.f);
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) + 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.01f + size});
+				model = glm::rotate(model, -0.3f, {0.f, 0.f, 1.f});
+				model = glm::translate(model, {0.1f *i + 0.05f * (i - 1), 0.f, 0.f});
+				model = glm::scale(model, {0.12f, 0.12f, 0.12f});
+
+				glUniformMatrix4fv(flat_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniform4f(flat_albedo_location, 0.0f, 0.0f, 0.0f, 1.f);
+				glDrawArrays(
+					GL_TRIANGLE_STRIP,
+					0,
+					4
+				);
+			}
+			for (int i = 1; i < container.known_fighter_get_attack_energy(fighter) / 0.125; i++) {
+
+				glm::mat4 model (1.f);
+				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) + 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.05f + size});
+				model = glm::rotate(model, -0.3f, {0.f, 0.f, 1.f});
+				model = glm::translate(model, {0.1f *i + 0.05f * (i - 1), 0.f, 0.f});
+				model = glm::scale(model, {0.09f, 0.09f, 0.09f});
+
+				glUniformMatrix4fv(flat_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
+				glUniform4f(flat_albedo_location, 0.9f, 0.1f, 0.1f, 1.f);
 				glDrawArrays(
 					GL_TRIANGLE_STRIP,
 					0,
