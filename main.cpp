@@ -528,12 +528,16 @@ struct relink_update {
 static_assert(sizeof(relink_update) == 12);
 
 struct udp_update {
+
 	// 4 bytes
 	uint8_t update_type;
 	uint8_t padding[3];
 
 	// 4 bytes
 	int timestamp;
+
+	// 4 bytes
+	int sent_to_player;
 
 	// 12 bytes
 	union {
@@ -543,7 +547,7 @@ struct udp_update {
 		high_precision_update high_precision;
 	} payload;
 };
-static_assert(sizeof(udp_update) == 20);
+static_assert(sizeof(udp_update) == 24);
 
 
 namespace command {
@@ -800,6 +804,10 @@ int main(void)
 				// printf("Bytes received: %d\n", iResult);
 				memcpy(&position_received, recvbuf, sizeof(udp_update));
 
+				auto sent_to  = position_received.sent_to_player;
+				if (sent_to != my_player_index) {
+					continue;
+				}
 
 				if (position_received.update_type == UPDATE_SPATIAL) {
 					if (position_received.timestamp < last_timestamp_spatial && last_timestamp_spatial < position_received.timestamp + 16000) {
@@ -822,6 +830,9 @@ int main(void)
 						auto path = container.visible_spatial_entity_get_path_length(entity);
 						if (spatial.spatial_entity_id != my_spatial_index) {
 							container.visible_spatial_entity_set_path_length(entity, path + distance * 0.5f);
+
+							assert(std::isfinite(last_x + shift_x * 0.5f));
+							assert(std::isfinite(last_y + shift_y * 0.5f));
 							container.visible_spatial_entity_set_x(entity, last_x + shift_x * 0.5f);
 							container.visible_spatial_entity_set_y(entity, last_y + shift_y * 0.5f);
 						}
@@ -831,6 +842,8 @@ int main(void)
 						auto entity = container.create_visible_spatial_entity();
 						container.visible_spatial_entity_set_direction(entity, ((float)spatial.direction * 2.f  * glm::pi<float>()) / 255.f);
 						container.visible_spatial_entity_set_path_length(entity, 0.f);
+						assert(std::isfinite(next_x));
+						assert(std::isfinite(next_y));
 						container.visible_spatial_entity_set_x(entity, next_x);
 						container.visible_spatial_entity_set_y(entity, next_y);
 						index_to_spatial_entity[spatial.spatial_entity_id] = entity;
