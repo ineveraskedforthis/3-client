@@ -6,11 +6,39 @@ object{
 	storage_type{erasable}
 
 	property{
-		name{x}
+		name{previous_x}
 		type{float}
 	}
 	property{
-		name{y}
+		name{previous_y}
+		type{float}
+	}
+	property{
+		name{view_x}
+		type{float}
+	}
+	property{
+		name{view_y}
+		type{float}
+	}
+	property{
+		name{target_x}
+		type{float}
+	}
+	property{
+		name{target_y}
+		type{float}
+	}
+	property{
+		name{last_update_time}
+		type{float}
+	}
+	property{
+		name{current_update_time}
+		type{float}
+	}
+	property{
+		name{historical_speed}
 		type{float}
 	}
 	property{

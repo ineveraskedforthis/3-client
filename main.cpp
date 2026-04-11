@@ -801,6 +801,7 @@ int main(void)
 			}
 			iResult = recv(ConnectSocketUDP, recvbuf, recvbuflen, 0);
 			if (iResult > 0) {
+				auto time = glfwGetTime();
 				// printf("Bytes received: %d\n", iResult);
 				memcpy(&position_received, recvbuf, sizeof(udp_update));
 
@@ -820,21 +821,18 @@ int main(void)
 					if (it != index_to_spatial_entity.end()) {
 						auto entity = it->second;
 						container.visible_spatial_entity_set_direction(entity, ((float)spatial.direction * 2.f  * glm::pi<float>()) / 255.f);
-						auto last_x = container.visible_spatial_entity_get_x(entity);
-						auto last_y = container.visible_spatial_entity_get_y(entity);
+						auto last_x = container.visible_spatial_entity_get_target_x(entity);
+						auto last_y = container.visible_spatial_entity_get_target_y(entity);
 						auto next_x = my_x + (float)spatial.x / 100.f;
 						auto next_y = my_y + (float)spatial.y / 100.f;
-						auto shift_x = next_x - last_x;
-						auto shift_y = next_y - last_y;
-						auto distance = sqrtf(shift_x * shift_x +  shift_y * shift_y);
 						auto path = container.visible_spatial_entity_get_path_length(entity);
 						if (spatial.spatial_entity_id != my_spatial_index) {
-							container.visible_spatial_entity_set_path_length(entity, path + distance * 0.5f);
-
-							assert(std::isfinite(last_x + shift_x * 0.5f));
-							assert(std::isfinite(last_y + shift_y * 0.5f));
-							container.visible_spatial_entity_set_x(entity, last_x + shift_x * 0.5f);
-							container.visible_spatial_entity_set_y(entity, last_y + shift_y * 0.5f);
+							container.visible_spatial_entity_set_previous_x(entity, last_x);
+							container.visible_spatial_entity_set_previous_y(entity, last_y);
+							container.visible_spatial_entity_set_target_x(entity, next_x);
+							container.visible_spatial_entity_set_target_y(entity, next_y);
+							container.visible_spatial_entity_set_last_update_time(entity, container.visible_spatial_entity_get_current_update_time(entity));
+							container.visible_spatial_entity_set_current_update_time(entity, time);
 						}
 					} else {
 						auto next_x = my_x + (float)spatial.x / 100.f;
@@ -844,8 +842,10 @@ int main(void)
 						container.visible_spatial_entity_set_path_length(entity, 0.f);
 						assert(std::isfinite(next_x));
 						assert(std::isfinite(next_y));
-						container.visible_spatial_entity_set_x(entity, next_x);
-						container.visible_spatial_entity_set_y(entity, next_y);
+						container.visible_spatial_entity_set_target_x(entity, next_x);
+						container.visible_spatial_entity_set_target_y(entity, next_y);
+						container.visible_spatial_entity_set_last_update_time(entity, container.visible_spatial_entity_get_current_update_time(entity));
+						container.visible_spatial_entity_set_current_update_time(entity, time);
 						index_to_spatial_entity[spatial.spatial_entity_id] = entity;
 					}
 				} else if (position_received.update_type == UPDATE_FIGHTER) {
@@ -903,22 +903,16 @@ int main(void)
 					auto it = index_to_spatial_entity.find(position_received.payload.high_precision.spatial_entity_id);
 
 					if (position_received.payload.high_precision.spatial_entity_id == my_spatial_index && it != index_to_spatial_entity.end()) {
-						auto prev_x = container.visible_spatial_entity_get_x(it->second);
-						auto prev_y = container.visible_spatial_entity_get_y(it->second);
-						auto shift_x = position_received.payload.high_precision.x - prev_x;
-						auto shift_y = position_received.payload.high_precision.y - prev_y;
-						auto distance = sqrtf(shift_x * shift_x +  shift_y * shift_y);
-						auto path = container.visible_spatial_entity_get_path_length(it->second);
-						container.visible_spatial_entity_set_path_length(it->second, path + distance * 0.3f);
-
-						container.visible_spatial_entity_set_x(it->second, prev_x + shift_x * 0.3f);
-						container.visible_spatial_entity_set_y(it->second, prev_y + shift_y * 0.3f);
-
+						auto prev_x = container.visible_spatial_entity_get_target_x(it->second);
+						auto prev_y = container.visible_spatial_entity_get_target_y(it->second);
+						container.visible_spatial_entity_set_previous_x(it->second, prev_x);
+						container.visible_spatial_entity_set_previous_y(it->second, prev_y);
+						container.visible_spatial_entity_set_target_x(it->second, position_received.payload.high_precision.x);
+						container.visible_spatial_entity_set_target_y(it->second, position_received.payload.high_precision.y);
+						container.visible_spatial_entity_set_last_update_time(it->second, container.visible_spatial_entity_get_current_update_time(it->second));
+						container.visible_spatial_entity_set_current_update_time(it->second, time);
 						my_x = position_received.payload.high_precision.x;
 						my_y = position_received.payload.high_precision.y;
-
-						camera_target.x = my_x;
-						camera_target.y = -my_y - 15.f;
 					}
 				}
 			}
@@ -945,7 +939,56 @@ int main(void)
 			update_timer = 0.f;
 		}
 		camera_speed = camera_target.xy - camera_position.xy;
-		camera_position.xy += camera_speed * (1.f - exp(-dt * 10.f));
+		camera_position.xy += camera_speed * (1.f - exp(-dt * 4.f));
+
+		float movement_shift_mult =(1.f - exp(-dt * 10.f));
+
+		container.for_each_visible_spatial_entity([&](auto item){
+			auto next_x = container.visible_spatial_entity_get_target_x(item);
+			auto next_y = container.visible_spatial_entity_get_target_y(item);
+			auto prev_x = container.visible_spatial_entity_get_previous_x(item);
+			auto prev_y = container.visible_spatial_entity_get_previous_y(item);
+			auto last_update = container.visible_spatial_entity_get_last_update_time(item);
+			auto current_update = container.visible_spatial_entity_get_current_update_time(item);
+			if (time > last_update) {
+				auto speed_x = (next_x - prev_x) / (current_update - last_update);
+				auto speed_y = (next_y - prev_y) / (current_update - last_update);
+
+				auto current_x = container.visible_spatial_entity_get_view_x(item);
+				auto current_y = container.visible_spatial_entity_get_view_y(item);
+				auto required_shift_x = next_x - current_x;
+				auto required_shift_y = next_y - current_y;
+				auto distance_squared = required_shift_x * required_shift_x + required_shift_y * required_shift_y;
+
+				auto path = container.visible_spatial_entity_get_path_length(item);
+
+				if (
+					abs(required_shift_x) < abs(speed_x * dt)
+					|| abs(required_shift_y) < abs(speed_y * dt)
+				) {
+					container.visible_spatial_entity_set_view_x(item, next_x);
+					container.visible_spatial_entity_set_view_y(item, next_y);
+
+					container.visible_spatial_entity_set_path_length(item, path + sqrtf(distance_squared));
+				} else {
+					container.visible_spatial_entity_set_view_x(item, current_x + required_shift_x * movement_shift_mult);
+					container.visible_spatial_entity_set_view_y(item, current_y + required_shift_y * movement_shift_mult);
+
+					container.visible_spatial_entity_set_path_length(item, path + sqrtf(distance_squared) * movement_shift_mult);
+				}
+			} else {
+				container.visible_spatial_entity_set_view_x(item, next_x);
+				container.visible_spatial_entity_set_view_y(item, next_y);
+			}
+
+			if (my_spatial_index) {
+				auto my_index = index_to_spatial_entity.find(my_spatial_index.value());
+				if (my_index != index_to_spatial_entity.end() && my_index->second == item) {
+					camera_target.x = container.visible_spatial_entity_get_view_x(item);;
+					camera_target.y = -container.visible_spatial_entity_get_view_y(item) - 15.f;
+				}
+			}
+		});
 
 		// if (glfwGetWindowAttrib(window, GLFW_ICONIFIED) != 0) {
 		// 	ImGui_ImplGlfw_Sleep(10);
@@ -1409,7 +1452,7 @@ int main(void)
 			}
 
 			glm::mat4 model (1.f);
-			model = glm::translate(model, {container.visible_spatial_entity_get_x(cid), -container.visible_spatial_entity_get_y(cid), 0.01f});
+			model = glm::translate(model, {container.visible_spatial_entity_get_view_x(cid), -container.visible_spatial_entity_get_view_y(cid), 0.01f});
 			model = glm::scale(model, {size, size, size});
 			glUniformMatrix4fv(default_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 			glDrawArrays(
@@ -1442,7 +1485,7 @@ int main(void)
 			// circle under
 			{
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(spatial), -container.visible_spatial_entity_get_y(spatial), 0.5f});
+				model = glm::translate(model, {container.visible_spatial_entity_get_view_x(spatial), -container.visible_spatial_entity_get_view_y(spatial), 0.5f});
 				model = glm::scale(model, {size, size, size});
 				glUniformMatrix4fv(circle_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
 				glUniform4f(circle_albedo_location, 1.0f, 1.0f, 0.1f, 0.8f);
@@ -1485,7 +1528,7 @@ int main(void)
 			//bg
 			{
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.f + size});
+				model = glm::translate(model, {container.visible_spatial_entity_get_view_x(cid) - 0.5f, -container.visible_spatial_entity_get_view_y(cid) + size, 0.f + size});
 				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
 				model = glm::scale(model, {0.5f, 0.1f, 0.1f});
 				glUniformMatrix4fv(flat_basic_location.model, 1, GL_FALSE, reinterpret_cast<float *>(&model));
@@ -1500,7 +1543,7 @@ int main(void)
 			// top
 			if (max_hp > 0) {
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) - 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.05f + size});
+				model = glm::translate(model, {container.visible_spatial_entity_get_view_x(cid) - 0.5f, -container.visible_spatial_entity_get_view_y(cid) + size, 0.05f + size});
 				model = glm::rotate(model, 0.3f, {0.f, 0.f, 1.f});
 				model = glm::scale(model, {0.5f * width, 0.1f, 0.1f});
 
@@ -1517,7 +1560,7 @@ int main(void)
 			for (int i = 1; i < container.known_fighter_get_attack_energy(fighter) / 0.125; i++) {
 
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) + 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.01f + size});
+				model = glm::translate(model, {container.visible_spatial_entity_get_view_x(cid) + 0.5f, -container.visible_spatial_entity_get_view_y(cid) + size, 0.01f + size});
 				model = glm::rotate(model, -0.3f, {0.f, 0.f, 1.f});
 				model = glm::translate(model, {0.1f *i + 0.05f * (i - 1), 0.f, 0.f});
 				model = glm::scale(model, {0.12f, 0.12f, 0.12f});
@@ -1533,7 +1576,7 @@ int main(void)
 			for (int i = 1; i < container.known_fighter_get_attack_energy(fighter) / 0.125; i++) {
 
 				glm::mat4 model (1.f);
-				model = glm::translate(model, {container.visible_spatial_entity_get_x(cid) + 0.5f, -container.visible_spatial_entity_get_y(cid) + size, 0.05f + size});
+				model = glm::translate(model, {container.visible_spatial_entity_get_view_x(cid) + 0.5f, -container.visible_spatial_entity_get_view_y(cid) + size, 0.05f + size});
 				model = glm::rotate(model, -0.3f, {0.f, 0.f, 1.f});
 				model = glm::translate(model, {0.1f *i + 0.05f * (i - 1), 0.f, 0.f});
 				model = glm::scale(model, {0.09f, 0.09f, 0.09f});
