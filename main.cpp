@@ -460,13 +460,38 @@ struct shader_2d_data {
 	GLuint aspect_ratio;
 };
 
-constexpr inline int ACTION_LOGIN = 0;
-struct action_update {
-	int action;
+constexpr inline uint8_t TCP_LOGIN = 0;
+constexpr inline uint8_t TCP_FIGHTER = 1;
+struct tcp_login_update{
 	int player_id;
-	int fighter_id;
-	int entity_id;
+
+	uint8_t padding[4];
+
+	uint8_t padding2[4];
 };
+static_assert(sizeof(tcp_login_update) == 12);
+struct tcp_fighter_update{
+	int fighter_id;
+
+	int location_id;
+
+	uint8_t race_id;
+	uint8_t padding2[3];
+};
+static_assert(sizeof(tcp_fighter_update) == 12);
+struct tcp_update{
+	// 4 bytes
+	uint8_t update_type;
+	uint8_t padding[3];
+
+	// 12 bytes
+	union {
+		tcp_login_update login;
+		tcp_fighter_update fighter;
+	} payload;
+};
+static_assert(sizeof(tcp_update) == 16);
+
 
 inline constexpr uint8_t UPDATE_SPATIAL = 0;
 inline constexpr uint8_t UPDATE_FIGHTER = 1;
@@ -510,7 +535,7 @@ struct fighter_update {
 	// 4 bytes
 	uint8_t energy;
 	uint8_t attack_energy;
-	uint8_t model;
+	uint8_t race;
 	uint8_t weapon_type;
 };
 static_assert(sizeof(fighter_update) == 12);
@@ -566,7 +591,8 @@ struct data {
 	float target_y;
 	uint8_t command_type;
 	uint8_t command_data;
-	uint8_t padding[2];
+	uint8_t race;
+	uint8_t padding[1];
 };
 
 }
@@ -595,6 +621,7 @@ int main(void)
 	std::optional<int> my_player_index;
 	std::optional<int> my_fighter_index;
 	std::optional<int> my_spatial_index;
+	// std::optional<uint8_t> my_race;
 	float my_x;
 	float my_y;
 
@@ -785,7 +812,7 @@ int main(void)
 	char recvbuf[DEFAULT_BUFLEN];
 	int recvbuflen = DEFAULT_BUFLEN;
 
-	action_update action_received {};
+	tcp_update action_received {};
 	udp_update position_received {};
 
 	bool udp_socket_ready = false;
@@ -873,11 +900,13 @@ int main(void)
 						}
 
 						container.known_fighter_set_attack_energy(entity,  (float)payload.attack_energy / 255.f);
+						container.known_fighter_set_race(entity, payload.race);
 					} else {
 						auto entity = container.create_known_fighter();
 						container.known_fighter_set_hp_current(entity, payload.hp);
 						container.known_fighter_set_hp_max(entity, payload.max_hp);
 						container.known_fighter_set_attack_energy(entity, (float)payload.attack_energy / 255.f);
+						container.known_fighter_set_race(entity, payload.race);
 						index_to_fighter[payload.fighter_id] = entity;
 					}
 				} else if (position_received.update_type == UPDATE_RELINK) {
@@ -1130,19 +1159,36 @@ int main(void)
 				udp_socket_ready = true;
 			}
 
-			if (ConnectSocketTCP != INVALID_SOCKET && ImGui::Button("Respawn")) {
-				command::data data {};
-				data.player = my_player_index.value();
-				data.command_type = command::RESPAWN;
-
-				iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
-				if (iResult == SOCKET_ERROR) {
-					printf("send failed: %d\n", WSAGetLastError());
-					closesocket(ConnectSocketTCP);
-					WSACleanup();
-					return 1;
-				}
+			if (
+				ConnectSocketTCP != INVALID_SOCKET
+				&& ImGui::Button("Create new character")
+			) {
+				ImGui::OpenPopup("Create new character");
 			}
+
+			if (ImGui::BeginPopupModal("Create new character", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+				static int race_id = 0;
+
+				const char* races[] = { "Rat", "Human"};
+				ImGui::Combo("Race", &race_id, races, 2);
+
+				if (ImGui::Button("Send request")) {
+					command::data data {};
+					data.player = my_player_index.value();
+					data.command_type = command::RESPAWN;
+					data.race = race_id;
+					iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
+					if (iResult == SOCKET_ERROR) {
+						printf("send failed: %d\n", WSAGetLastError());
+						closesocket(ConnectSocketTCP);
+						WSACleanup();
+						return 1;
+					}
+					ImGui::CloseCurrentPopup();
+				}
+				ImGui::EndPopup();
+			}
+
 
 			ImGui::Text("Application average %.3f ms/frame (%.1f FPS)", 1000.0f / io.Framerate, io.Framerate);
 			ImGui::End();
@@ -1155,13 +1201,16 @@ int main(void)
 			iResult = recv(ConnectSocketTCP, recvbuf, recvbuflen, 0);
 			if (iResult > 0) {
 				printf("Bytes received: %d\n", iResult);
-				memcpy(&action_received, recvbuf, sizeof(action_update));
+				memcpy(&action_received, recvbuf, sizeof(tcp_update));
 
-				if (action_received.action == ACTION_LOGIN) {
-					my_fighter_index = action_received.fighter_id;
-					my_spatial_index = action_received.entity_id;
-					my_player_index = action_received.player_id;
-					printf("I am %d at location %d", my_fighter_index.value(), my_spatial_index.value());
+				if (action_received.update_type == TCP_LOGIN) {
+					my_player_index = action_received.payload.login.player_id;
+					printf("My player ID is %d\n", my_player_index.value());
+				} else if (action_received.update_type == TCP_FIGHTER) {
+					my_fighter_index = action_received.payload.fighter.fighter_id;
+					my_spatial_index = action_received.payload.fighter.location_id;
+					printf("My fighter ID is %d\n", my_fighter_index.value());
+					printf("My spatial ID is %d\n", my_spatial_index.value());
 				}
 			}
 			else if (iResult == 0) {
@@ -1287,8 +1336,8 @@ int main(void)
 
 		glBindVertexArray(tile_mesh.vao);
 
-		auto visible_tile_x = floor(camera_position.x / TILE_SIZE);
-		auto visible_tile_y = floor(-camera_position.y / TILE_SIZE);
+		auto visible_tile_x = std::clamp(floor(camera_position.x / TILE_SIZE), -10000.f, 10000.f);
+		auto visible_tile_y = std::clamp(floor(-camera_position.y / TILE_SIZE), -10000.f, 10000.f);
 
 		for (float i = visible_tile_x - 2.f; i <= visible_tile_x + 2.f; i++) {
 			for (float j = visible_tile_y-1.f;  j <= visible_tile_y + 1.f; j++) {
@@ -1412,10 +1461,10 @@ int main(void)
 
 		glBindVertexArray(object_mesh.vao);
 		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
-			auto model_tag = container.visible_spatial_entity_get_model(cid);
 			auto size = 1.f;
 
 			auto fighter = container.visible_spatial_entity_get_fighter_from_fighter_location(cid);
+			auto race = container.known_fighter_get_race(fighter);
 
 			bool action = false;
 			if (fighter) {
@@ -1429,7 +1478,7 @@ int main(void)
 				hp_ratio = (float) hp / (float) max_hp;
 			}
 
-			if (model_tag == 0) {
+			if (race == 0) {
 				choose_rat_sprite(
 					albedo_texture_location,
 					flip_location,
@@ -1440,7 +1489,7 @@ int main(void)
 					action
 				);
 				size = 2.f;
-			} else  {
+			} else if (race == 1)  {
 				choose_rogue_sprite(
 					albedo_texture_location,
 					flip_location,
@@ -1471,9 +1520,9 @@ int main(void)
 		container.for_each_known_fighter([&](dcon::known_fighter_id fighter){
 			auto spatial = container.known_fighter_get_spatial_entity_from_fighter_location(fighter);
 			if (!spatial) return;
-			auto model_tag = container.visible_spatial_entity_get_model(spatial);
+			auto race = container.known_fighter_get_race(fighter);
 			auto size = 1.f;
-			if (model_tag == 0) {
+			if (race == 0) {
 				size = 2.f;
 			} else  {
 			}
@@ -1511,9 +1560,9 @@ int main(void)
 				return;
 			}
 
-			auto model_tag = container.visible_spatial_entity_get_model(cid);
+			auto race = container.known_fighter_get_race(fighter);
 			auto size = 1.f;
-			if (model_tag == 0) {
+			if (race == 0) {
 				size = 2.f;
 			} else  {
 			}
