@@ -817,12 +817,14 @@ int main(void)
 
 	bool udp_socket_ready = false;
 
+	bool game_in_process = true;
+
 	std::thread position_updates([&](){
 		int last_timestamp_spatial = -1;
 		int last_timestamp_fighter= -1;
 		int last_timestamp_relink= -1;
 		int last_timestamp_high_precision= -1;
-		while(1) {
+		while(game_in_process) {
 			if (!udp_socket_ready) {
 				Sleep(10);
 			}
@@ -960,6 +962,7 @@ int main(void)
 
 		double time = glfwGetTime();
 		float dt = (float)(time - last_time);
+		dt = std::clamp(dt, 0.f, 1.f);
 		last_time = time;
 
 		update_timer += dt;
@@ -1648,6 +1651,8 @@ int main(void)
 	}
 
 	// Cleanup/
+	game_in_process = false;
+	position_updates.join();
 
 	closesocket(ConnectSocketTCP);
 	closesocket(ConnectSocketUDP);
