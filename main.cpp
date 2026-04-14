@@ -28,7 +28,7 @@
 
 #include "stb_image/stb_image.h"
 
-
+#include "content.hpp"
 
 #include "unordered_dense.h"
 
@@ -497,6 +497,23 @@ inline constexpr uint8_t UPDATE_SPATIAL = 0;
 inline constexpr uint8_t UPDATE_FIGHTER = 1;
 inline constexpr uint8_t UPDATE_RELINK = 2;
 inline constexpr uint8_t UPDATE_HIGH_PRECISION = 3;
+inline constexpr uint8_t UPDATE_ITEM_RELINK = 4;
+inline constexpr uint8_t UPDATE_ITEM = 5;
+
+struct item_update {
+	// 4 bytes
+	int item_id;
+
+	// 4 bytes
+	uint8_t item_type;
+	bool is_container;
+	uint8_t contained_commodity;
+	uint8_t padding[1];
+
+	// 4 bytes
+	int contained_amount;
+};
+static_assert(sizeof(item_update) == 12);
 
 struct high_precision_update {
 	// 4 bytes
@@ -540,9 +557,22 @@ struct fighter_update {
 };
 static_assert(sizeof(fighter_update) == 12);
 
+
 struct relink_update {
 	// 4 bytes
 	int fighter_id;
+
+	// 4 bytes
+	int item_id;
+
+	// 4 bytes
+	uint8_t padding[4];
+};
+static_assert(sizeof(relink_update) == 12);
+
+struct relink_item_update {
+	// 4 bytes
+	int item_id;
 
 	// 4 bytes
 	int spatial_id;
@@ -550,7 +580,7 @@ struct relink_update {
 	// 4 bytes
 	uint8_t padding[4];
 };
-static_assert(sizeof(relink_update) == 12);
+static_assert(sizeof(relink_item_update) == 12);
 
 struct udp_update {
 
@@ -569,7 +599,9 @@ struct udp_update {
 		spatial_update spatial;
 		fighter_update fighter;
 		relink_update relink;
+		relink_item_update relink_item;
 		high_precision_update high_precision;
+		item_update item;
 	} payload;
 };
 static_assert(sizeof(udp_update) == 24);
@@ -618,12 +650,14 @@ int main(void)
 
 	ankerl::unordered_dense::map<int, dcon::visible_spatial_entity_id> index_to_spatial_entity;
 	ankerl::unordered_dense::map<int, dcon::known_fighter_id> index_to_fighter;
+	ankerl::unordered_dense::map<int, dcon::known_item_id> index_to_item;
 	std::optional<int> my_player_index;
 	std::optional<int> my_fighter_index;
 	std::optional<int> my_spatial_index;
+
 	// std::optional<uint8_t> my_race;
-	float my_x;
-	float my_y;
+	float my_x = 0.f;
+	float my_y = 0.f;
 
 	float my_energy;
 	std::vector<float> energy_history;
@@ -821,9 +855,11 @@ int main(void)
 
 	std::thread position_updates([&](){
 		int last_timestamp_spatial = -1;
-		int last_timestamp_fighter= -1;
-		int last_timestamp_relink= -1;
-		int last_timestamp_high_precision= -1;
+		int last_timestamp_fighter = -1;
+		int last_timestamp_item = -1;
+		int last_timestamp_relink = -1;
+		int last_timestamp_relink_item = -1;
+		int last_timestamp_high_precision = -1;
 		while(game_in_process) {
 			if (!udp_socket_ready) {
 				Sleep(10);
@@ -902,13 +938,11 @@ int main(void)
 						}
 
 						container.known_fighter_set_attack_energy(entity,  (float)payload.attack_energy / 255.f);
-						container.known_fighter_set_race(entity, payload.race);
 					} else {
 						auto entity = container.create_known_fighter();
 						container.known_fighter_set_hp_current(entity, payload.hp);
 						container.known_fighter_set_hp_max(entity, payload.max_hp);
 						container.known_fighter_set_attack_energy(entity, (float)payload.attack_energy / 255.f);
-						container.known_fighter_set_race(entity, payload.race);
 						index_to_fighter[payload.fighter_id] = entity;
 					}
 				} else if (position_received.update_type == UPDATE_RELINK) {
@@ -917,13 +951,13 @@ int main(void)
 					} else {
 						last_timestamp_relink = position_received.timestamp;
 					}
-					auto it = index_to_spatial_entity.find(position_received.payload.relink.spatial_id);
+					auto it = index_to_item.find(position_received.payload.relink.item_id);
 					auto it2 = index_to_fighter.find(position_received.payload.relink.fighter_id);
 					if (
-						it != index_to_spatial_entity.end()
+						it != index_to_item.end()
 						&& it2 != index_to_fighter.end()
 					) {
-						container.force_create_fighter_location(it2->second, it->second);
+						container.force_create_embodiment(it2->second, it->second);
 					}
 				} else if (position_received.update_type == UPDATE_HIGH_PRECISION) {
 					if (position_received.timestamp < last_timestamp_high_precision && last_timestamp_high_precision < position_received.timestamp + 16000) {
@@ -944,6 +978,36 @@ int main(void)
 						container.visible_spatial_entity_set_current_update_time(it->second, time);
 						my_x = position_received.payload.high_precision.x;
 						my_y = position_received.payload.high_precision.y;
+					}
+				} else if (position_received.update_type == UPDATE_ITEM_RELINK) {
+					if (position_received.timestamp < last_timestamp_relink_item && last_timestamp_relink_item < position_received.timestamp + 16000) {
+						continue;
+					} else {
+						last_timestamp_relink_item = position_received.timestamp;
+					}
+					auto it = index_to_spatial_entity.find(position_received.payload.relink_item.spatial_id);
+					auto it2 = index_to_item.find(position_received.payload.relink_item.item_id);
+					if (
+						it != index_to_spatial_entity.end()
+						&& it2 != index_to_item.end()
+					) {
+						container.force_create_item_location(it2->second, it->second);
+					}
+				} else if (position_received.update_type == UPDATE_ITEM) {
+					if (position_received.timestamp < last_timestamp_item && last_timestamp_item < position_received.timestamp + 16000) {
+						continue;
+					} else {
+						last_timestamp_item = position_received.timestamp;
+					}
+					auto payload = position_received.payload.item;
+					auto it2 = index_to_item.find(payload.item_id);
+					if (it2 != index_to_item.end()) {
+						auto entity = it2->second;
+						container.known_item_set_item_type(entity, payload.item_type);
+					} else {
+						auto entity = container.create_known_item();
+						container.known_item_set_item_type(entity, payload.item_type);
+						index_to_item[payload.item_id] = entity;
 					}
 				}
 			}
@@ -1040,7 +1104,7 @@ int main(void)
 		glm::vec3 light_x = glm::normalize(glm::cross(light_z, {0.f, 0.f, 1.f}));
 		glm::vec3 light_y = glm::cross(light_x, light_z);
 
-		{
+		if (ConnectSocketTCP != INVALID_SOCKET) {
 			ImGui::Begin("Stats");
 			if (ImPlot::BeginPlot("Energy")) {
 				static ImPlotAxisFlags flags;
@@ -1052,6 +1116,41 @@ int main(void)
 				ImPlot::PlotLine("Attack", attack_energy_history.data(), attack_energy_history.size());
 				ImPlot::EndPlot();
 			}
+			ImGui::End();
+		}
+
+		if (ConnectSocketTCP != INVALID_SOCKET) {
+			ImGui::Begin("Actions");
+
+			if (ImGui::Button("Look for nearby items")) {
+				ImGui::OpenPopup("Loot");
+			}
+
+			if (ImGui::BeginPopupModal("Loot", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+
+				container.for_each_known_item([&](auto item){
+					auto item_location = container.known_item_get_spatial_entity_from_item_location(item);
+					auto x = container.visible_spatial_entity_get_target_x(item_location);
+					auto y = container.visible_spatial_entity_get_target_y(item_location);
+
+					auto dx = my_x - x;
+					auto dy = my_y - y;
+
+					auto d_sq = dx * dx + dy * dy;
+
+					if (d_sq < 9.f) {
+						ImGui::Text("Item: %d; Distance: %f", item.index(), sqrtf(d_sq));
+					}
+				});
+
+				if (ImGui::Button("Close")) {
+					ImGui::CloseCurrentPopup();
+				}
+
+				ImGui::EndPopup();
+			}
+
+
 			ImGui::End();
 		}
 
@@ -1466,22 +1565,21 @@ int main(void)
 		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
 			auto size = 1.f;
 
-			auto fighter = container.visible_spatial_entity_get_fighter_from_fighter_location(cid);
-			auto race = container.known_fighter_get_race(fighter);
+			auto body = container.visible_spatial_entity_get_item_from_item_location(cid);
+			auto fighter = container.known_item_get_fighter_from_embodiment(body);
+			auto body_type = container.known_item_get_item_type(body);
 
+			float hp_ratio = 0.f;
 			bool action = false;
-			if (fighter) {
-				action = container.known_fighter_get_attack_energy(fighter) > 0;
-			}
 
-			float hp_ratio = 1.f;
 			if (fighter) {
 				auto hp = container.known_fighter_get_hp_current(fighter);
 				auto max_hp = container.known_fighter_get_hp_max(fighter);
 				hp_ratio = (float) hp / (float) max_hp;
+				action = container.known_fighter_get_attack_energy(fighter) > 0;
 			}
 
-			if (race == 0) {
+			if (body_type == item::kind::rat_body) {
 				choose_rat_sprite(
 					albedo_texture_location,
 					flip_location,
@@ -1492,7 +1590,7 @@ int main(void)
 					action
 				);
 				size = 2.f;
-			} else if (race == 1)  {
+			} else if (body_type == item::kind::human_body)  {
 				choose_rogue_sprite(
 					albedo_texture_location,
 					flip_location,
@@ -1521,13 +1619,21 @@ int main(void)
 
 		glBindVertexArray(centered_square.vao);
 		container.for_each_known_fighter([&](dcon::known_fighter_id fighter){
-			auto spatial = container.known_fighter_get_spatial_entity_from_fighter_location(fighter);
+			// auto spatial = container.known_fighter_get(fighter);
+			auto body = container.known_fighter_get_item_from_embodiment(fighter);
+			auto body_type = container.known_item_get_item_type(body);
+			auto spatial = container.known_item_get_spatial_entity_from_item_location(body);
 			if (!spatial) return;
-			auto race = container.known_fighter_get_race(fighter);
+
 			auto size = 1.f;
-			if (race == 0) {
+			if (
+				body_type == item::kind::rat_body
+			) {
 				size = 2.f;
-			} else  {
+			} else if (
+				body_type == item::kind::human_body
+			)  {
+				size = 1.f;
 			}
 
 			auto hp = container.known_fighter_get_hp_current(fighter);
@@ -1558,16 +1664,20 @@ int main(void)
 
 		glBindVertexArray(object_mesh.vao);
 		container.for_each_visible_spatial_entity([&] (dcon::visible_spatial_entity_id cid) {
-			auto fighter = container.visible_spatial_entity_get_fighter_from_fighter_location(cid);
+
+			auto body = container.visible_spatial_entity_get_item_from_item_location(cid);
+			auto fighter = container.known_item_get_fighter_from_embodiment(body);
+			auto body_type = container.known_item_get_item_type(body);
+
 			if (!fighter) {
 				return;
 			}
 
-			auto race = container.known_fighter_get_race(fighter);
 			auto size = 1.f;
-			if (race == 0) {
+			if (body_type == item::kind::rat_body) {
 				size = 2.f;
-			} else  {
+			} else if (body_type == item::kind::human_body)  {
+				size = 1.f;
 			}
 
 			auto hp = container.known_fighter_get_hp_current(fighter);

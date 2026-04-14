@@ -72,6 +72,21 @@ object{
 		name{attack_energy}
 		type{float}
 	}
+}
+
+object{
+	name{known_item}
+	size{10000}
+	storage_type{erasable}
+
+	property{
+		name{weight}
+		type{float}
+	}
+	property{
+		name{item_type}
+		type{uint8_t}
+	}
 	property{
 		name{race}
 		type{uint8_t}
@@ -79,7 +94,23 @@ object{
 }
 
 relationship{
-	name{fighter_location}
+	name{item_location}
+	size{10000}
+	storage_type{erasable}
+	link{
+		object{known_item}
+		name{item}
+		type{unique}
+	}
+	link{
+		object{visible_spatial_entity}
+		name{spatial_entity}
+		type{unique}
+	}
+}
+
+relationship{
+	name{embodiment}
 	size{4000}
 	storage_type{erasable}
 	link{
@@ -89,8 +120,8 @@ relationship{
 	}
 
 	link{
-		object{visible_spatial_entity}
-		name{spatial_entity}
+		object{known_item}
+		name{item}
 		type{unique}
 	}
 }
