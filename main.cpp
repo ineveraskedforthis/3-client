@@ -615,6 +615,7 @@ inline constexpr uint8_t RUN_STOP = 2;
 inline constexpr uint8_t ATTACK_START = 3;
 inline constexpr uint8_t ATTACK_STOP = 4;
 inline constexpr uint8_t RESPAWN = 5;
+inline constexpr uint8_t REQUEST_ACTIONS = 5;
 
 struct data {
 	int32_t player;
@@ -1119,14 +1120,14 @@ int main(void)
 			ImGui::End();
 		}
 
-		if (ConnectSocketTCP != INVALID_SOCKET) {
+		if (ConnectSocketTCP != INVALID_SOCKET && my_fighter_index) {
 			ImGui::Begin("Actions");
 
-			if (ImGui::Button("Look for nearby items")) {
-				ImGui::OpenPopup("Loot");
+			if (ImGui::Button("List nearby items")) {
+				ImGui::OpenPopup("Items");
 			}
 
-			if (ImGui::BeginPopupModal("Loot", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
+			if (ImGui::BeginPopupModal("Items", NULL, ImGuiWindowFlags_AlwaysAutoResize)) {
 
 				container.for_each_known_item([&](auto item){
 					auto item_location = container.known_item_get_spatial_entity_from_item_location(item);
@@ -1137,9 +1138,12 @@ int main(void)
 					auto dy = my_y - y;
 
 					auto d_sq = dx * dx + dy * dy;
-
+					auto item_type = container.known_item_get_item_type(item);
+					auto fighter = container.known_item_get_fighter_from_embodiment(item);
+					std::string owner = fighter ? (fighter == index_to_fighter[my_fighter_index.value()] ? "Me" : std::to_string(fighter.index())) : "None";
 					if (d_sq < 9.f) {
-						ImGui::Text("Item: %d; Distance: %f", item.index(), sqrtf(d_sq));
+						ImGui::Text("%s(%d); Distance: %f; Embodies %s", item::names[item_type].c_str(), item.index(), sqrtf(d_sq), owner.c_str());
+						// ImGui::Button("Available actions:");
 					}
 				});
 
