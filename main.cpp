@@ -51,6 +51,8 @@
 
 #include "sprite.hpp"
 
+#include "3-common/payloads.hpp"
+
 constexpr inline float TILE_SIZE = 64.f;
 
 constexpr inline float GRASS_TILE_SIZE = 16.f;
@@ -460,152 +462,6 @@ struct shader_2d_data {
 	GLuint aspect_ratio;
 };
 
-constexpr inline uint8_t TCP_LOGIN = 0;
-constexpr inline uint8_t TCP_FIGHTER = 1;
-struct tcp_login_update{
-	int player_id;
-
-	uint8_t padding[4];
-
-	uint8_t padding2[4];
-};
-static_assert(sizeof(tcp_login_update) == 12);
-struct tcp_fighter_update{
-	int fighter_id;
-
-	int location_id;
-
-	uint8_t race_id;
-	uint8_t padding2[3];
-};
-static_assert(sizeof(tcp_fighter_update) == 12);
-struct tcp_update{
-	// 4 bytes
-	uint8_t update_type;
-	uint8_t padding[3];
-
-	// 12 bytes
-	union {
-		tcp_login_update login;
-		tcp_fighter_update fighter;
-	} payload;
-};
-static_assert(sizeof(tcp_update) == 16);
-
-
-inline constexpr uint8_t UPDATE_SPATIAL = 0;
-inline constexpr uint8_t UPDATE_FIGHTER = 1;
-inline constexpr uint8_t UPDATE_RELINK = 2;
-inline constexpr uint8_t UPDATE_HIGH_PRECISION = 3;
-inline constexpr uint8_t UPDATE_ITEM_RELINK = 4;
-inline constexpr uint8_t UPDATE_ITEM = 5;
-
-struct item_update {
-	// 4 bytes
-	int item_id;
-
-	// 4 bytes
-	uint8_t item_type;
-	bool is_container;
-	uint8_t contained_commodity;
-	uint8_t padding[1];
-
-	// 4 bytes
-	int contained_amount;
-};
-static_assert(sizeof(item_update) == 12);
-
-struct high_precision_update {
-	// 4 bytes
-	int spatial_entity_id;
-
-	// 4 bytes
-	float x;
-
-	// 4 bytes
-	float y;
-};
-static_assert(sizeof(high_precision_update) == 12);
-
-struct spatial_update {
-	// 4 bytes
-	int spatial_entity_id;
-
-	// 4 bytes
-	int16_t x;
-	int16_t y;
-
-	// 4 bytes
-	uint8_t direction;
-	uint8_t padding[3];
-};
-static_assert(sizeof(spatial_update) == 12);
-
-struct fighter_update {
-	// 4 bytes
-	int fighter_id;
-
-	// 4 bytes
-	int16_t hp;
-	int16_t max_hp;
-
-	// 4 bytes
-	uint8_t energy;
-	uint8_t attack_energy;
-	uint8_t race;
-	uint8_t weapon_type;
-};
-static_assert(sizeof(fighter_update) == 12);
-
-
-struct relink_update {
-	// 4 bytes
-	int fighter_id;
-
-	// 4 bytes
-	int item_id;
-
-	// 4 bytes
-	uint8_t padding[4];
-};
-static_assert(sizeof(relink_update) == 12);
-
-struct relink_item_update {
-	// 4 bytes
-	int item_id;
-
-	// 4 bytes
-	int spatial_id;
-
-	// 4 bytes
-	uint8_t padding[4];
-};
-static_assert(sizeof(relink_item_update) == 12);
-
-struct udp_update {
-
-	// 4 bytes
-	uint8_t update_type;
-	uint8_t padding[3];
-
-	// 4 bytes
-	int timestamp;
-
-	// 4 bytes
-	int sent_to_player;
-
-	// 12 bytes
-	union {
-		spatial_update spatial;
-		fighter_update fighter;
-		relink_update relink;
-		relink_item_update relink_item;
-		high_precision_update high_precision;
-		item_update item;
-	} payload;
-};
-static_assert(sizeof(udp_update) == 24);
-
 
 namespace command {
 
@@ -652,6 +508,7 @@ int main(void)
 	ankerl::unordered_dense::map<int, dcon::visible_spatial_entity_id> index_to_spatial_entity;
 	ankerl::unordered_dense::map<int, dcon::known_fighter_id> index_to_fighter;
 	ankerl::unordered_dense::map<int, dcon::known_item_id> index_to_item;
+
 	std::optional<int> my_player_index;
 	std::optional<int> my_fighter_index;
 	std::optional<int> my_spatial_index;
@@ -847,8 +704,8 @@ int main(void)
 	char recvbuf[DEFAULT_BUFLEN];
 	int recvbuflen = DEFAULT_BUFLEN;
 
-	tcp_update action_received {};
-	udp_update position_received {};
+	tcp_payload::tcp_update action_received {};
+	udp_payload::udp_update position_received {};
 
 	bool udp_socket_ready = false;
 
@@ -869,14 +726,14 @@ int main(void)
 			if (iResult > 0) {
 				auto time = glfwGetTime();
 				// printf("Bytes received: %d\n", iResult);
-				memcpy(&position_received, recvbuf, sizeof(udp_update));
+				memcpy(&position_received, recvbuf, sizeof(udp_payload::udp_update));
 
 				auto sent_to  = position_received.sent_to_player;
 				if (sent_to != my_player_index) {
 					continue;
 				}
 
-				if (position_received.update_type == UPDATE_SPATIAL) {
+				if (position_received.update_type == udp_payload::UPDATE_SPATIAL) {
 					if (position_received.timestamp < last_timestamp_spatial && last_timestamp_spatial < position_received.timestamp + 16000) {
 						continue;
 					} else {
@@ -914,7 +771,7 @@ int main(void)
 						container.visible_spatial_entity_set_current_update_time(entity, time);
 						index_to_spatial_entity[spatial.spatial_entity_id] = entity;
 					}
-				} else if (position_received.update_type == UPDATE_FIGHTER) {
+				} else if (position_received.update_type == udp_payload::UPDATE_FIGHTER) {
 					if (position_received.timestamp < last_timestamp_fighter && last_timestamp_fighter < position_received.timestamp + 16000) {
 						continue;
 					} else {
@@ -946,7 +803,7 @@ int main(void)
 						container.known_fighter_set_attack_energy(entity, (float)payload.attack_energy / 255.f);
 						index_to_fighter[payload.fighter_id] = entity;
 					}
-				} else if (position_received.update_type == UPDATE_RELINK) {
+				} else if (position_received.update_type == udp_payload::UPDATE_RELINK) {
 					if (position_received.timestamp < last_timestamp_relink && last_timestamp_relink < position_received.timestamp + 16000) {
 						continue;
 					} else {
@@ -960,7 +817,7 @@ int main(void)
 					) {
 						container.force_create_embodiment(it2->second, it->second);
 					}
-				} else if (position_received.update_type == UPDATE_HIGH_PRECISION) {
+				} else if (position_received.update_type == udp_payload::UPDATE_HIGH_PRECISION) {
 					if (position_received.timestamp < last_timestamp_high_precision && last_timestamp_high_precision < position_received.timestamp + 16000) {
 						continue;
 					} else {
@@ -980,7 +837,7 @@ int main(void)
 						my_x = position_received.payload.high_precision.x;
 						my_y = position_received.payload.high_precision.y;
 					}
-				} else if (position_received.update_type == UPDATE_ITEM_RELINK) {
+				} else if (position_received.update_type == udp_payload::UPDATE_ITEM_RELINK) {
 					if (position_received.timestamp < last_timestamp_relink_item && last_timestamp_relink_item < position_received.timestamp + 16000) {
 						continue;
 					} else {
@@ -994,7 +851,7 @@ int main(void)
 					) {
 						container.force_create_item_location(it2->second, it->second);
 					}
-				} else if (position_received.update_type == UPDATE_ITEM) {
+				} else if (position_received.update_type == udp_payload::UPDATE_ITEM) {
 					if (position_received.timestamp < last_timestamp_item && last_timestamp_item < position_received.timestamp + 16000) {
 						continue;
 					} else {
@@ -1143,7 +1000,19 @@ int main(void)
 					std::string owner = fighter ? (fighter == index_to_fighter[my_fighter_index.value()] ? "Me" : std::to_string(fighter.index())) : "None";
 					if (d_sq < 9.f) {
 						ImGui::Text("%s(%d); Distance: %f; Embodies %s", item::names[item_type].c_str(), item.index(), sqrtf(d_sq), owner.c_str());
-						// ImGui::Button("Available actions:");
+						if (ImGui::Button("Request actions:")) {
+							command::data data {};
+							data.player = my_player_index.value();
+							data.command_type = command::REQUEST_ACTIONS;
+							data.target_entity = container.known_item_get_original_index(item);
+							iResult = send(ConnectSocketTCP, (char*)&data, (int) sizeof(command::data), 0);
+							if (iResult == SOCKET_ERROR) {
+								printf("send failed: %d\n", WSAGetLastError());
+								closesocket(ConnectSocketTCP);
+								WSACleanup();
+								return 1;
+							}
+						}
 					}
 				});
 
@@ -1307,12 +1176,12 @@ int main(void)
 			iResult = recv(ConnectSocketTCP, recvbuf, recvbuflen, 0);
 			if (iResult > 0) {
 				printf("Bytes received: %d\n", iResult);
-				memcpy(&action_received, recvbuf, sizeof(tcp_update));
+				memcpy(&action_received, recvbuf, sizeof(tcp_payload::tcp_update));
 
-				if (action_received.update_type == TCP_LOGIN) {
+				if (action_received.update_type == tcp_payload::TCP_LOGIN) {
 					my_player_index = action_received.payload.login.player_id;
 					printf("My player ID is %d\n", my_player_index.value());
-				} else if (action_received.update_type == TCP_FIGHTER) {
+				} else if (action_received.update_type == tcp_payload::TCP_FIGHTER) {
 					my_fighter_index = action_received.payload.fighter.fighter_id;
 					my_spatial_index = action_received.payload.fighter.location_id;
 					printf("My fighter ID is %d\n", my_fighter_index.value());

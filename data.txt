@@ -91,6 +91,10 @@ object{
 		name{race}
 		type{uint8_t}
 	}
+	property{
+		name{original_index}
+		type{int32_t}
+	}
 }
 
 relationship{
